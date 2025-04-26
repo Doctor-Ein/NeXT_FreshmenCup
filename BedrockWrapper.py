@@ -2,9 +2,14 @@ import json
 import os
 import time
 import sys
+import threading
+import re
+from enum import Enum
+from typing import Dict, Optional
 
 # import pyaudio
 import boto3
+from botocore.config import Config
 
 # from amazon_transcribe.client import TranscribeStreamingClient
 # from amazon_transcribe.handlers import TranscriptResultStreamHandler
@@ -56,20 +61,67 @@ def printInfo():
     *************************************************************
     '''
     print(info_text) 
-def printer(text, level):
+
+class ErrorType(Enum):
+    CONNECTION_TIMEOUT = "connection_timeout"
+    READ_TIMEOUT = "read_timeout"
+    VALIDATION_ERROR = "validation_error"
+    STREAM_ERROR = "stream_error"
+    KEEPALIVE_ERROR = "keepalive_error"
+    RECONNECT_ERROR = "reconnect_error"
+    UNKNOWN_ERROR = "unknown_error"
+
+class ErrorAnalyzer:
+    """
+    错误分析器
+    功能描述：分析错误信息并分类
+    """
+    
+    ERROR_PATTERNS = {
+        ErrorType.CONNECTION_TIMEOUT: r"Connect timeout on endpoint URL",
+        ErrorType.READ_TIMEOUT: r"Read timeout on endpoint URL",
+        ErrorType.VALIDATION_ERROR: r"ValidationException|Malformed input request",
+        ErrorType.STREAM_ERROR: r"Stream Error",
+        ErrorType.KEEPALIVE_ERROR: r"Failed to send keepalive",
+        ErrorType.RECONNECT_ERROR: r"Failed to reconnect"
+    }
+    
+    @staticmethod
+    def analyze_error(error_message: str) -> ErrorType:
+        """
+        分析错误信息并返回错误类型
+        :param error_message: 错误信息
+        :return: 错误类型
+        """
+        for error_type, pattern in ErrorAnalyzer.ERROR_PATTERNS.items():
+            if re.search(pattern, error_message):
+                return error_type
+        return ErrorType.UNKNOWN_ERROR
+
+def printer(text: str, level: str) -> None:
     """
     打印日志信息
-    功能描述：根据日志级别打印信息
+    功能描述：根据日志级别打印信息，错误信息重定向到 stderr
     :param text: 要打印的文本
     :param level: 日志级别（info或debug）
     """
-    if config['log_level'] == 'info' and level == 'info':
+    if level == 'error':
+        print(text, file=sys.stderr)
+    elif config['log_level'] == 'info' and level == 'info':
         print(text)
     elif config['log_level'] == 'debug' and level in ['info', 'debug']:
         print(text)
 
 # 初始化音频处理和AWS服务客户端
-bedrock_runtime = boto3.client(service_name='bedrock-runtime', region_name=config['region'])
+bedrock_runtime = boto3.client(
+    service_name='bedrock-runtime',
+    region_name=config['region'],
+    config=Config(
+        connect_timeout=5,  # 连接超时时间（秒）
+        read_timeout=30,    # 读取超时时间（秒）
+        retries={'max_attempts': 3}  # 最大重试次数
+    )
+)
 
 class BedrockModelsWrapper:
     """
@@ -220,7 +272,8 @@ def StreamHandler(bedrock_stream) -> Generator[str, None, None]:
             yield text # 直接返回，处理的步骤极少
                 
     except Exception as e:
-        print(f"\n[Stream Error] {str(e)}")
+        error_message = f"\n[Stream Error] {str(e)}"
+        printer(error_message, 'error')
         raise
 
 class BedrockWrapper:
@@ -234,6 +287,107 @@ class BedrockWrapper:
         初始化Amazon Bedrock封装类
         """
         self.speaking = False
+        self.last_heartbeat = time.time()
+        self.heartbeat_interval = 5  # 心跳检测间隔（秒）
+        self.max_silence_time = 10   # 最大静默时间（秒）
+        self.keepalive_interval = 60  # 保活心跳间隔（秒）
+        self.keepalive_thread = None
+        self.is_running = False
+        self.connection_active = False
+        self.last_error: Optional[ErrorType] = None
+
+    def start_keepalive(self):
+        """
+        启动保活线程
+        """
+        if self.keepalive_thread is None or not self.keepalive_thread.is_alive():
+            self.is_running = True
+            self.keepalive_thread = threading.Thread(target=self._keepalive_loop)
+            self.keepalive_thread.daemon = True
+            self.keepalive_thread.start()
+            printer('[INFO] Keepalive thread started', 'info')
+
+    def stop_keepalive(self):
+        """
+        停止保活线程
+        """
+        self.is_running = False
+        if self.keepalive_thread and self.keepalive_thread.is_alive():
+            self.keepalive_thread.join(timeout=2)
+            printer('[INFO] Keepalive thread stopped', 'info')
+
+    def _keepalive_loop(self):
+        """
+        保活循环
+        """
+        while self.is_running:
+            try:
+                if self.connection_active:
+                    # 发送保活心跳
+                    self._send_keepalive()
+                time.sleep(self.keepalive_interval)
+            except Exception as e:
+                printer(f'[ERROR] Keepalive error: {str(e)}', 'info')
+                time.sleep(1)
+
+    def _send_keepalive(self):
+        """
+        发送保活心跳
+        """
+        global bedrock_runtime
+        try:
+            # 使用更轻量级的方式发送保活心跳
+            response = bedrock_runtime.invoke_model_with_response_stream(
+                body=json.dumps({
+                    "anthropic_version": "bedrock-2023-05-31",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": "ping"}]
+                        }
+                    ],
+                    "max_tokens": 1,
+                    "temperature": 0,
+                    "top_p": 1
+                }),
+                modelId=config['bedrock']['api_request']['modelId'],
+                accept=config['bedrock']['api_request']['accept'],
+                contentType=config['bedrock']['api_request']['contentType']
+            )
+            
+            # 设置一个更短的超时时间用于读取响应
+            start_time = time.time()
+            stream = response.get('body')
+            for event in stream:
+                if event.get('chunk'):
+                    break  # 收到第一个响应就停止
+                # 如果超过3秒还没收到响应，就认为保活成功
+                if time.time() - start_time > 3:
+                    break
+                    
+            printer('[DEBUG] Keepalive heartbeat sent', 'debug')
+        except Exception as e:
+            error_message = f'[ERROR] Failed to send keepalive: {str(e)}'
+            self.last_error = ErrorAnalyzer.analyze_error(error_message)
+            printer(error_message, 'error')
+            self.connection_active = False
+            # 如果保活失败，尝试重新建立连接
+            try:
+                # 重新初始化客户端
+                bedrock_runtime = boto3.client(
+                    service_name='bedrock-runtime',
+                    region_name=config['region'],
+                    config=Config(
+                        connect_timeout=5,
+                        read_timeout=30,  # 增加读取超时时间
+                        retries={'max_attempts': 3}
+                    )
+                )
+                printer('[INFO] Reinitialized bedrock client', 'info')
+            except Exception as reconnect_error:
+                error_message = f'[ERROR] Failed to reconnect: {str(reconnect_error)}'
+                self.last_error = ErrorAnalyzer.analyze_error(error_message)
+                printer(error_message, 'error')
 
     def is_speaking(self):
         """
@@ -241,6 +395,17 @@ class BedrockWrapper:
         :return: 是否正在说话
         """
         return self.speaking
+
+    def check_heartbeat(self, current_time):
+        """
+        检查心跳状态
+        :param current_time: 当前时间
+        :return: 是否需要恢复
+        """
+        if current_time - self.last_heartbeat > self.max_silence_time:
+            printer('[WARNING] Heartbeat timeout detected, attempting recovery...', 'info')
+            return True
+        return False
 
     def invoke_bedrock(self, text, dialogue_list = [], images = []):
         """
@@ -253,12 +418,18 @@ class BedrockWrapper:
         """
         printer('[DEBUG] Bedrock generation started', 'debug')
         self.speaking = True
+        self.connection_active = True
+        self.last_heartbeat = time.time()
+        
+        # 确保保活线程在运行
+        self.start_keepalive()
+
         body = BedrockModelsWrapper.define_body(text, dialogue_list, images)
         printer(f"[DEBUG] Request body: {body}", 'debug')
 
         try:
             body_json = json.dumps(body)
-            response = bedrock_runtime.invoke_model_with_response_stream( # 利用boto3定义响应对象
+            response = bedrock_runtime.invoke_model_with_response_stream(
                 body=body_json,
                 modelId=config['bedrock']['api_request']['modelId'],
                 accept=config['bedrock']['api_request']['accept'],
@@ -266,39 +437,73 @@ class BedrockWrapper:
             )
 
             printer('[DEBUG] Capturing Bedrocks response/bedrock_stream', 'debug')
-            bedrock_stream = response.get('body') # 实际的调用就这一句，但是其实是同步阻塞式的
+            bedrock_stream = response.get('body')
             printer(f"[DEBUG] Bedrock_stream: {bedrock_stream}", 'debug')
 
-            audio_gen = StreamHandler(bedrock_stream) # generator
+            audio_gen = StreamHandler(bedrock_stream)
             printer('[DEBUG] Created bedrock stream to audio generator', 'debug')
 
-            response_text = '' # 记录此次回复的全部文本
-            for audio in audio_gen: # 得先从generator中才能获取文本
-                print(audio,end="") # 调试用，不要随意换行
+            response_text = ''
+            for audio in audio_gen:
+                current_time = time.time()
+                if self.check_heartbeat(current_time):
+                    # 尝试重新建立连接
+                    printer('[INFO] Attempting to reestablish connection...', 'info')
+                    return self.invoke_bedrock(text, dialogue_list, images)
+                
+                self.last_heartbeat = current_time
+                self.connection_active = True
+                print(audio, end="")
                 response_text += audio
-            print(history) # 这个得拿来看看
 
         except Exception as e:
-            print(e)
+            printer(f'[ERROR] {str(e)}', 'info')
+            self.connection_active = False
             time.sleep(2)
             self.speaking = False
+            # 发生异常时也尝试恢复
+            if "timeout" in str(e).lower():
+                printer('[INFO] Timeout detected, attempting recovery...', 'info')
+                return self.invoke_bedrock(text, dialogue_list, images)
 
         time.sleep(1)
         self.speaking = False
         printer('\n[DEBUG] Bedrock generation completed', 'debug')
         return response_text
-    
+
+    def __del__(self):
+        """
+        析构函数，确保保活线程被正确停止
+        """
+        self.stop_keepalive()
+
+    def get_last_error(self) -> Optional[ErrorType]:
+        """
+        获取最后一次错误类型
+        :return: 错误类型
+        """
+        return self.last_error
+
+    def clear_last_error(self) -> None:
+        """
+        清除最后一次错误
+        """
+        self.last_error = None
+
 if __name__ == '__main__':
     history = [] # 存储对话历史的列表
     bedrock_wrapper = BedrockWrapper() 
-    while True:
-        if not bedrock_wrapper.is_speaking():
-            input_text = input("[Please Input]：")
-            if len(input_text) != 0:
-                request_text = input_text # 这里处理模型的预设提示词？
-                printer(f'\n[INFO] request_text: {request_text}', 'info')
+    try:
+        while True:
+            if not bedrock_wrapper.is_speaking():
+                input_text = input("[Please Input]：")
+                if len(input_text) != 0:
+                    request_text = input_text
+                    printer(f'\n[INFO] request_text: {request_text}', 'info')
 
-                return_output = bedrock_wrapper.invoke_bedrock(request_text, dialogue_list=history, images=[]) # 为了不混乱对话历史的顺序，不能异步调用~
+                    return_output = bedrock_wrapper.invoke_bedrock(request_text, dialogue_list=history, images=[])
 
-                history.append({"role":"user","content":[{ "type": "text","text": input_text}]}) # 向对话历史中，插入用户输入（取出了提示词）
-                history.append({"role":"assistant","content":[{ "type": "text","text": return_output}]}) # 向对话历史中，插入模型回复
+                    history.append({"role":"user","content":[{ "type": "text","text": input_text}]})
+                    history.append({"role":"assistant","content":[{ "type": "text","text": return_output}]})
+    finally:
+        bedrock_wrapper.stop_keepalive()
