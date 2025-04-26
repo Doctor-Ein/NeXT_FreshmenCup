@@ -1,0 +1,5 @@
+pymilvus>=2.3.0
+llama-index-core>=0.9.0
+llama-index-embeddings-huggingface>=0.1.0
+transformers>=4.30.0
+torch>=2.0.0 
