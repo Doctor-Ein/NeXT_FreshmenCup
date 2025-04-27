@@ -2,12 +2,9 @@ import json
 import os
 import time
 import sys
-import re
-from typing import Dict, Optional
 
 import boto3
 from botocore.config import Config
-
 from api_request_schema import api_request_list, get_model_ids
 
 model_id = os.getenv('MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0') # 从环境变量中获取模型id
@@ -31,20 +28,6 @@ config = {
         'retry_delay': 2       # 重试延迟时间（秒）
     }
 }
-
-def printer(text: str, level: str) -> None:
-    """
-    打印日志信息
-    功能描述：根据日志级别打印信息，错误信息重定向到 stderr
-    :param text: 要打印的文本
-    :param level: 日志级别（info或debug）
-    """
-    if level == 'error':
-        print(text, file=sys.stderr)
-    elif config['log_level'] == 'info' and level == 'info':
-        print(text)
-    elif config['log_level'] == 'debug' and level in ['info', 'debug']:
-        print(text)
 
 # 初始化AWS服务客户端
 bedrock_runtime = boto3.client(
@@ -271,6 +254,20 @@ class BedrockWrapper:
         printer('\n[DEBUG] Bedrock generation completed', 'debug')
         return response_text
 
+def printer(text: str, level: str) -> None:
+    """
+    打印日志信息
+    功能描述：根据日志级别打印信息，错误信息重定向到 stderr
+    :param text: 要打印的文本
+    :param level: 日志级别（info或debug）
+    """
+    if level == 'error':
+        print(text, file=sys.stderr)
+    elif config['log_level'] == 'info' and level == 'info':
+        print(text)
+    elif config['log_level'] == 'debug' and level in ['info', 'debug']:
+        print(text)
+
 if __name__ == '__main__':
     history = [] # 存储对话历史的列表
     bedrock_wrapper = BedrockWrapper() 
@@ -288,3 +285,4 @@ if __name__ == '__main__':
                     history.append({"role":"assistant","content":[{ "type": "text","text": return_output}]})
     finally:
         pass
+
