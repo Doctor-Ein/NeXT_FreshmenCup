@@ -2,3 +2,7 @@
 __pycache__/
 models/
 test*
+local_models/
+Data/
+MD/
+NeXT/

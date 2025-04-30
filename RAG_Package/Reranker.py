@@ -4,7 +4,7 @@ from typing import List, Dict
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 class MilvusReranker:
-    def __init__(self, model_name: str = "./models/bge-reranker-large", device: str = None):
+    def __init__(self, model_name: str = "./local_models/bge-reranker-large", device: str = None):
         """
         初始化Milvus专用的重排器（强制离线模式）
         
