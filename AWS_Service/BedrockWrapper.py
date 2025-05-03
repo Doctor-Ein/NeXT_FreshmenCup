@@ -2,10 +2,11 @@ import json
 import os
 import time
 import sys
+import base64
 
 import boto3
 from botocore.config import Config
-from api_request_schema import api_request_list, get_model_ids
+from .api_request_schema import api_request_list, get_model_ids
 
 model_id = os.getenv('MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0') # 从环境变量中获取模型id
 aws_region = os.getenv('AWS_REGION', 'us-east-1') # 从环境变量中获取AWS区域
@@ -195,14 +196,6 @@ class BedrockWrapper:
         """
         初始化Amazon Bedrock封装类
         """
-        self.speaking = False
-
-    def is_speaking(self):
-        """
-        检查是否正在说话
-        :return: 是否正在说话
-        """
-        return self.speaking
 
     def invoke_bedrock(self, text, dialogue_list = [], images = []):
         """
@@ -214,9 +207,16 @@ class BedrockWrapper:
         :return: 输出文本
         """
         printer('[DEBUG] Bedrock generation started', 'debug')
-        self.speaking = True
         
-        body = BedrockModelsWrapper.define_body(text, dialogue_list, images)
+        image_info = []
+        
+        for image in images:
+            with open(image, 'rb') as f:
+                image_info.append({
+                    "media_type": os.path.splitext(image)[1],
+                    "data" : base64.b64encode(f.read()).decode()})
+
+        body = BedrockModelsWrapper.define_body(text, dialogue_list, image_info)
         printer(f"[DEBUG] Request body: {body}", 'debug')
 
         try:
@@ -243,14 +243,12 @@ class BedrockWrapper:
         except Exception as e:
             printer(f'[ERROR] {str(e)}', 'info')
             time.sleep(config['network']['retry_delay'])
-            self.speaking = False
             # 发生异常时尝试重试
             if "timeout" in str(e).lower():
                 printer('[INFO] Timeout detected, attempting retry...', 'info')
                 return self.invoke_bedrock(text, dialogue_list, images)
 
         time.sleep(1)
-        self.speaking = False
         printer('\n[DEBUG] Bedrock generation completed', 'debug')
         return response_text
 
@@ -273,16 +271,15 @@ if __name__ == '__main__':
     bedrock_wrapper = BedrockWrapper() 
     try:
         while True:
-            if not bedrock_wrapper.is_speaking():
-                input_text = input("[Please Input]：")
-                if len(input_text) != 0:
-                    request_text = input_text
-                    printer(f'\n[INFO] request_text: {request_text}', 'info')
+            input_text = input("[Please Input]:")
+            if len(input_text) != 0:
+                request_text = input_text
+                printer(f'\n[INFO] request_text: {request_text}', 'info')
 
-                    return_output = bedrock_wrapper.invoke_bedrock(request_text, dialogue_list=history, images=[])
+                return_output = bedrock_wrapper.invoke_bedrock(request_text, dialogue_list=history, images=[])
 
-                    history.append({"role":"user","content":[{ "type": "text","text": input_text}]})
-                    history.append({"role":"assistant","content":[{ "type": "text","text": return_output}]})
+                history.append({"role":"user","content":[{ "type": "text","text": input_text}]})
+                history.append({"role":"assistant","content":[{ "type": "text","text": return_output}]})
     finally:
         pass
 

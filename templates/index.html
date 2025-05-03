@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<!-- 需求 -->
+<!-- LaTeX输入&输出支持 -->
+<!-- 回复等待优化 -->
+<!-- 界面布局优化 -->
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ver .alpha</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: sans-serif;
+            display: flex;
+            height: 100vh;
+            background: hwb(198 63% 2% / 0.845);
+        }
+
+        .sidebar {
+            width: 250px;
+            background: #e2c0ff;
+            padding: 40px 20px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .chat-history {
+            margin-top: 20px;
+        }
+
+        .chat-history h3 {
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+
+        .history-entry {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: pointer;
+            padding: 5px 8px;
+            border-radius: 5px;
+            margin-bottom: 5px;
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        .history-entry:hover {
+            background: rgba(255, 255, 255, 0.7);
+        }
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+        }
+
+        .top-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .top-bar input {
+            border: none;
+            background: transparent;
+            font-size: 1.2em;
+            border-bottom: 1px solid #ccc;
+            flex: 1;
+        }
+
+        .chat-box {
+            flex: 1;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 30px;
+            margin-bottom: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            scroll-behavior: smooth;
+        }
+
+        .chat-message {
+            display: flex;
+            align-items: flex-end;
+            margin: 10px 0;
+            max-width: 70%;
+            position: relative;
+        }
+
+        .chat-message.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .chat-message.ai {
+            align-self: flex-start;
+            flex-direction: row;
+        }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin: 10px;
+            align-self: flex-start;
+
+        }
+
+        .message-content {
+            background-color: #e9ecef;
+            padding: 10px 15px;
+            border-radius: 15px;
+            font-size: 1em;
+            line-height: 1.4;
+            position: relative;
+        }
+
+        .chat-message.user .message-content {
+            background-color: #aee1f9;
+        }
+
+        .message-content img {
+            max-width: 150px;
+            margin-top: 10px;
+            border-radius: 8px;
+            display: block;
+        }
+
+        .revoke-btn {
+            position: absolute;
+            bottom: -24px;
+            right: 8px;
+            font-size: 0.75em;
+            background: transparent;
+            color: #333;
+            border: none;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        .revoke-btn:hover {
+            color: red;
+        }
+
+        .bottom-bar {
+            margin-bottom: 10px;
+        }
+
+        .input-area {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            align-items: flex-start;
+        }
+
+        .input-inner {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            width: 100%;
+        }
+
+        .input-area textarea {
+            flex: 1;
+            resize: none;
+            padding: 10px;
+            font-size: 1em;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            height: 60px;
+            width: 100%;
+        }
+
+        .input-area button {
+            padding: 10px 15px;
+            font-size: 1em;
+            border-radius: 8px;
+            border: none;
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+        }
+
+        .input-area button:hover {
+            background-color: #45a049;
+        }
+
+        #imagePreview {
+            position: relative;
+        }
+
+        #imagePreview img {
+            max-width: 80px;
+            max-height: 80px;
+            border-radius: 8px;
+            margin-bottom: 5px;
+        }
+
+        .remove-image {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 1px solid #ccc;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            text-align: center;
+            line-height: 18px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .remove-image:hover {
+            background: #ffcccc;
+        }
+
+        .action-btns {
+            display: flex;
+            gap: 10px;
+            margin-top: 5px;
+        }
+
+        .action-btns button {
+            background: none;
+            border: none;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 0.9em;
+            text-decoration: underline;
+        }
+
+        .action-btns button:hover {
+            color: #0056b3;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="sidebar">
+        <div>
+            <div class="icon-button">🅰️</div>
+            <h3>历史对话</h3>
+            <div class="chat-history" id="chatHistory">
+            </div>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="top-bar">
+            <div class="icon-button">🅰️</div>
+            <input type="text" placeholder="Aniya" />
+            <!-- 标题 -->
+        </div>
+
+        <div class="chat-box" id="chatBox">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                        {% for category, message in messages %}
+                            {% if category == "userInput" %}
+                                <div class="chat-message user">
+                                    <img class="avatar" src="Aniya.jpg">
+                                    <div class="message-content">{{ message }}</div>
+                                </div>
+                            {% endif %}
+                            {% if category == "reply" %}
+                                <div class="chat-message ai">
+                                    <img class="avatar" src="LXCrobot.jpg">
+                                    <div class="message-content">{{ message }}</div>
+                                </div>
+                            {% endif %}
+                        {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+
+        <form method="post" enctype="multipart/form-data">
+
+            <input class="bottom-bar" type="file" id="file" name="file" />
+
+            <div class="input-area">
+                <div id="imagePreview"></div>
+                <textarea class="input-inner" id="userInput" name="userInput" placeholder="请输入你的问题..."></textarea>
+            </div>
+
+            <button id="sendBtn" type="submit">发送!</button>
+            
+        </form>
+    </div>
+    
+</body>
+
+</html>
