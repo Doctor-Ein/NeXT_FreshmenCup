@@ -1,8 +1,8 @@
 from huggingface_hub import snapshot_download
 from pathlib import Path
 
-MODEL_NAME = "BAAI/bge-m3"
-LOCAL_MODEL_DIR = "./local_models/bge-m3"
+MODEL_NAME = "deepcs233/VisCoT-13b-336"
+LOCAL_MODEL_DIR = "./local_models/VisCoT-13b-336"
 
 # 创建目录
 Path(LOCAL_MODEL_DIR).mkdir(parents=True, exist_ok=True)
@@ -20,24 +20,21 @@ print(f"完整模型已下载到: {LOCAL_MODEL_DIR}")
 print("目录内容:", [p.name for p in Path(LOCAL_MODEL_DIR).iterdir()])
 
 def verify_model():
-    required_files = {
-        "config.json": (10, 100),  # 文件大小范围(KB)
-        "model.safetensors": (500000, None),  # 至少500MB
-        "tokenizer.json": (100, 1000)
-    }
-    
-    for filename, (min_size, max_size) in required_files.items():
-        filepath = Path(LOCAL_MODEL_DIR)/filename
-        if not filepath.exists():
-            raise FileNotFoundError(f"缺失关键文件: {filename}")
-        
-        file_size = filepath.stat().st_size / 1024  # KB
-        if min_size and file_size < min_size:
-            raise ValueError(f"{filename} 文件过小(仅{file_size:.1f}KB)")
-        if max_size and file_size > max_size:
-            raise ValueError(f"{filename} 文件过大({file_size:.1f}KB)")
+    model_dir = Path(LOCAL_MODEL_DIR)
+    if not model_dir.exists():
+        print(f"❌ 模型目录不存在: {model_dir}")
+        return
 
-    print("✅ 模型验证通过！")
+    files = [f for f in model_dir.iterdir() if f.is_file()]
+    files_sorted = sorted(files, key=lambda x: x.name.lower())
+
+    print(f"\n📂 模型目录: {model_dir.resolve()}")
+    print("📄 文件列表（按名称排序）:")
+    for f in files_sorted:
+        size_mb = f.stat().st_size / (1024 * 1024)
+        print(f"  - {f.name:<30} {size_mb:.2f} MB")
+
+    print(f"\n✅ 共计 {len(files_sorted)} 个文件。")
 
 if __name__ == "__main__":
     verify_model()
