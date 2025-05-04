@@ -11,7 +11,7 @@ voiceNameList = ['Zhiyu', 'Ivy', 'Takumi', 'Seoyeon']
 voicePromptList = ['Chinese', 'English', 'Japanese', 'Korean']
 
 # 默认配置为中文
-voiceIndex = 2
+voiceIndex = 0
 
 config = {
     'log_level': 'none',  # One of: info, debug, none
@@ -38,6 +38,7 @@ class Reader:
         self.chunk = 1024
 
     def read(self, data):
+        
         response = self.polly.synthesize_speech(
             Text=data,
             Engine=config['polly']['Engine'],

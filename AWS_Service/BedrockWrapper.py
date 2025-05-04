@@ -5,7 +5,8 @@ import sys
 
 import boto3
 from botocore.config import Config
-from api_request_schema import api_request_list, get_model_ids
+from AWS_Service.api_request_schema import api_request_list, get_model_ids
+from AWS_Service.Polly import Reader
 
 model_id = os.getenv('MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0') # 从环境变量中获取模型id
 aws_region = os.getenv('AWS_REGION', 'us-east-1') # 从环境变量中获取AWS区域
@@ -16,7 +17,7 @@ if model_id not in get_model_ids(): # 验证模型存在于配置清单中
 
 api_request = api_request_list[model_id] # 定义全局的api_request配置表
 config = {
-    'log_level': 'info',  # One of: info, debug, none
+    'log_level': 'debug',  # One of: info, debug, none
     'region': aws_region,
     'bedrock': {
         'api_request': api_request
@@ -159,31 +160,62 @@ class BedrockModelsWrapper:
         printer(f'[DEBUG] {chunk_obj}', 'debug')
         return text
 
-# 纯字符级的Bedrock_Stream流处理生成器
-from typing import Generator
-def StreamHandler(bedrock_stream) -> Generator[str, None, None]:
-    """
-    字符级流式处理器
-    功能：
-    - 直接逐字符返回原始流内容
-    - 保持Markdown等结构化文本完整性
-    - 最低延迟输出
-    """
-    try:
-        for event in bedrock_stream:
-            if not (chunk := BedrockModelsWrapper.get_stream_chunk(event)):
-                continue
+# # 纯字符级的Bedrock_Stream流处理生成器
+# from typing import Generator
+# def StreamHandler(bedrock_stream) -> Generator[str, None, None]:
+#     """
+#     字符级流式处理器
+#     功能：
+#     - 直接逐字符返回原始流内容
+#     - 保持Markdown等结构化文本完整性
+#     - 最低延迟输出
+#     """
+#     try:
+#         for event in bedrock_stream:
+#             if not (chunk := BedrockModelsWrapper.get_stream_chunk(event)):
+#                 continue
                 
-            text = BedrockModelsWrapper.get_stream_text(chunk)
-            if not text:
-                continue
+#             text = BedrockModelsWrapper.get_stream_text(chunk)
+#             if not text:
+#                 continue
 
-            yield text
+#             yield text
                 
-    except Exception as e:
-        error_message = f"\n[Stream Error] {str(e)}"
-        printer(error_message, 'error')
-        raise
+#     except Exception as e:
+#         error_message = f"\n[Stream Error] {str(e)}"
+#         printer(error_message, 'error')
+#         raise
+
+import re
+# 音频生成器函数（支持中英文断句）-> 保留这个名字属实是有点传承的意味了（笑）
+def to_audio_generator(bedrock_stream):
+    prefix = ''
+    sentence_end_pattern = re.compile(r'([^。！？!?\.]+[。！？!?\.])')  # 捕获完整句子
+
+    if bedrock_stream:
+        for event in bedrock_stream:
+            chunk = BedrockModelsWrapper.get_stream_chunk(event)
+            if chunk:
+                text = BedrockModelsWrapper.get_stream_text(chunk)
+                full_text = prefix + text
+                sentences = sentence_end_pattern.findall(full_text)
+                if sentences:
+                    # 找到完整句子后，逐句生成
+                    for sent in sentences:
+                        print(sent, flush=True, end='')
+                        yield sent
+                    # 将未结束的部分存入 prefix
+                    prefix = sentence_end_pattern.sub('', full_text)
+                else:
+                    prefix = full_text  # 没有匹配到句子，继续累积
+        
+        # 流结束后，处理剩余内容
+        if prefix:
+            print(prefix, flush=True, end='')
+            yield prefix
+
+        print('\n')
+
 
 class BedrockWrapper:
     """
@@ -232,12 +264,65 @@ class BedrockWrapper:
             bedrock_stream = response.get('body')
             printer(f"[DEBUG] Bedrock_stream: {bedrock_stream}", 'debug')
 
-            audio_gen = StreamHandler(bedrock_stream)
+            audio_gen = to_audio_generator(bedrock_stream)
             printer('[DEBUG] Created bedrock stream to audio generator', 'debug')
 
             response_text = ''
             for audio in audio_gen:
                 print(audio, end="")
+                response_text += audio
+
+        except Exception as e:
+            printer(f'[ERROR] {str(e)}', 'info')
+            time.sleep(config['network']['retry_delay'])
+            self.speaking = False
+            # 发生异常时尝试重试
+            if "timeout" in str(e).lower():
+                printer('[INFO] Timeout detected, attempting retry...', 'info')
+                return self.invoke_bedrock(text, dialogue_list, images)
+
+        time.sleep(1)
+        self.speaking = False
+        printer('\n[DEBUG] Bedrock generation completed', 'debug')
+        return response_text
+
+    def invoke_voice(self, text, dialogue_list = [], images = []):
+        """
+        调用Bedrock模型
+        功能描述：调用Bedrock模型并处理响应
+        :param text: 输入文本
+        :param dialogue_list: 对话历史列表
+        :param images: 图片列表
+        :return: 输出文本
+        """
+        printer('[DEBUG] Bedrock generation started', 'debug')
+        self.speaking = True
+        
+        body = BedrockModelsWrapper.define_body(text, dialogue_list, images)
+        printer(f"[DEBUG] Request body: {body}", 'debug')
+
+        try:
+            body_json = json.dumps(body)
+            response = bedrock_runtime.invoke_model_with_response_stream(
+                body=body_json,
+                modelId=config['bedrock']['api_request']['modelId'],
+                accept=config['bedrock']['api_request']['accept'],
+                contentType=config['bedrock']['api_request']['contentType']
+            )
+
+            printer('[DEBUG] Capturing Bedrocks response/bedrock_stream', 'debug')
+            bedrock_stream = response.get('body')
+            printer(f"[DEBUG] Bedrock_stream: {bedrock_stream}", 'debug')
+
+            audio_gen = to_audio_generator(bedrock_stream)
+            printer('[DEBUG] Created bedrock stream to audio generator', 'debug')
+
+            reader = Reader()
+            response_text = ''
+            print("[Assistant]:",end="")
+            for audio in audio_gen:
+                print(audio,end="")
+                reader.read(audio) # 没有读出来是为何🤔
                 response_text += audio
 
         except Exception as e:

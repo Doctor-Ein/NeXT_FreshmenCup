@@ -1,10 +1,12 @@
 import os
 import asyncio
 import sounddevice
+from concurrent.futures import ThreadPoolExecutor
 
 from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent, TranscriptResultStream
+from AWS_Service.BedrockWrapper import BedrockWrapper
 
 # 支持的语言列表：中文、英语、日语、韩语
 # 注意：这里使用的是Transcribe的语言代码，与Polly的语言代码可能不同
@@ -19,15 +21,23 @@ aws_region = os.getenv('AWS_REGION', 'us-east-1')
 transcribe_streaming = TranscribeStreamingClient(region=aws_region)
 
 class TranscribeHandler(TranscriptResultStreamHandler):
+    text = []
+    history = []
+    last_time = 0
+    sample_count = 0
+    max_sample_counter = 4
+
     """处理AWS Transcribe服务返回的转录结果
     
     继承自TranscriptResultStreamHandler，用于处理实时语音转录流
     使用asyncio.Queue在异步环境中传递转录结果
     """
-    def __init__(self, transcript_result_stream: TranscriptResultStream):
+    def __init__(self, transcript_result_stream: TranscriptResultStream, bedrock_wrapper: BedrockWrapper, loop):
         super().__init__(transcript_result_stream)
         self.transcript_queue = asyncio.Queue(maxsize=10)  # 限制队列大小
         self.last_partial = ""  # 用于跟踪部分结果
+        self.bedrock = bedrock_wrapper
+        self.loop = loop
         
     async def handle_transcript_event(self, transcript_event: TranscriptEvent):
         """处理转录事件的回调方法
@@ -39,14 +49,48 @@ class TranscribeHandler(TranscriptResultStreamHandler):
             2. 过滤出非部分结果（完整的语音片段）
             3. 将转录文本放入异步队列
         """
-        results = transcript_event.transcript.results
-        if results:
-            for result in results:
-                for alt in result.alternatives:
-                    if not result.is_partial:
-                        # 完整结果，清除部分结果记录
-                        self.last_partial = ""
-                        await self.transcript_queue.put(alt.transcript)
+        if not self.bedrock.speaking:
+            printer("[Debug]:处理转录事件中...", "debug")
+            results = transcript_event.transcript.results
+            if results:
+                for result in results:
+                    if not result.is_partial:  # 只处理完整的转录结果
+                        # 输出转录文本
+                        for alt in result.alternatives:
+                            self.transcript_queue.put_nowait(alt.transcript) # 放入队列中🤔
+                            TranscribeHandler.text.append(alt.transcript)  # 存储转录结果到缓存
+            else:                
+                # 增加样本计数
+                TranscribeHandler.sample_count += 1  # 增加计数
+                
+                # 每隔一段时间或者样本计数达到上限时，提交文本
+                if TranscribeHandler.sample_count >= TranscribeHandler.max_sample_counter:
+
+                    if len(TranscribeHandler.text)!=0 :
+                        input_text = ' '.join(TranscribeHandler.text)
+                        
+                        # 执行文本提交到 BedrockWrapper
+                        executor = ThreadPoolExecutor(max_workers=1)
+                        self.loop.run_in_executor(
+                            executor,
+                            self.bedrock.invoke_voice,  # 这里调用模型
+                            input_text,
+                            TranscribeHandler.history  # 传递历史记录
+                        )
+
+                        # 清空文本缓存，准备接收下一次转录
+                        TranscribeHandler.text.clear()
+                        TranscribeHandler.sample_count = 0  # 重置样本计数
+
+
+        # results = transcript_event.transcript.results
+        # if results:
+        #     for result in results:
+        #         for alt in result.alternatives:
+        #             if not result.is_partial:
+        #                 # 完整结果，清除部分结果记录
+        #                 self.last_partial = ""
+        #                 await self.transcript_queue.put(alt.transcript)
                     # if result.is_partial:
                     #     # 只有当新的部分结果与上一个不同时才发送
                     #     if alt.transcript != self.last_partial:
@@ -64,7 +108,7 @@ class MicStream:
         self.is_continuous = is_continuous
         # 优化块大小和采样率
         self.block_size = 512  # 更小的块以减少延迟
-        self.samplerate = 44100  # 更高采样率（需与AWS参数匹配）
+        self.samplerate = 16000  # 更高采样率（需与AWS参数匹配）
 
     async def mic_stream(self):
         """创建麦克风输入流"""
@@ -126,7 +170,7 @@ class TranscribeService:
         4. 连续音频流的控制
         5. 网页接口的异步生成器
     """
-    def __init__(self, language_index=0):
+    def __init__(self, bedrock_wrapper, loop, language_index=0):
         """初始化转录服务
 
         Args:
@@ -139,6 +183,8 @@ class TranscribeService:
         self.stream = None
         self.continuous_task = None
         self.is_continuous = False
+        self.bedrock_wrapper = bedrock_wrapper
+        self.loop = loop
 
     async def start_transcribe(self):
         """启动转录服务（普通模式）
@@ -152,11 +198,11 @@ class TranscribeService:
 
         self.stream = await transcribe_streaming.start_stream_transcription(
             language_code=lc,
-            media_sample_rate_hz=44100,
+            media_sample_rate_hz=16000,
             media_encoding="pcm",
         )
         
-        self.handler = TranscribeHandler(self.stream.output_stream)
+        self.handler = TranscribeHandler(self.stream.output_stream, self.bedrock_wrapper, self.loop)
         asyncio.create_task(self.write_chunks_task())
         asyncio.create_task(self.handler.handle_events())
 
@@ -183,7 +229,7 @@ class TranscribeService:
             media_encoding="pcm",
         )
         
-        self.handler = TranscribeHandler(self.stream.output_stream)
+        self.handler = TranscribeHandler(self.stream.output_stream, self.bedrock_wrapper, self.loop)
         
         # 创建连续处理的任务
         self.continuous_task = asyncio.gather(
@@ -270,25 +316,16 @@ class TranscribeService:
         if was_running:
             await self.start_continuous_transcribe()
 
-async def main():
-    # 1. 初始化服务（默认中文）
-    service = TranscribeService()
-    
-    # 2. 启动连续转录
-    print("开始语音转录（按Ctrl+C停止）...")
-    await service.start_continuous_transcribe()
-    
-    # 3. 实时打印结果
-    try:
-        while True:
-            transcript = await service.get_transcript()
-            print(transcript,end="")
-    except KeyboardInterrupt:
-        pass
-    finally:
-        # 4. 停止服务
-        await service.stop_continuous_transcribe()
-        print("转录已停止")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+def printer(text: str, level: str) -> None:
+    """
+    打印日志信息
+    功能描述：根据日志级别打印信息，错误信息重定向到 stderr
+    :param text: 要打印的文本
+    :param level: 日志级别（info或debug）
+    """
+    if level == 'error':
+        print(text, file=sys.stderr)
+    elif config['log_level'] == 'info' and level == 'info':
+        print(text)
+    elif config['log_level'] == 'debug' and level in ['info', 'debug']:
+        print(text)
