@@ -1,34 +1,12 @@
 import json
-import os
 import time
 import sys
-
 import boto3
+import re
+
 from botocore.config import Config
-from AWS_Service.api_request_schema import api_request_list, get_model_ids
-from AWS_Service.Polly import Reader
-
-model_id = os.getenv('MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0') # 从环境变量中获取模型id
-aws_region = os.getenv('AWS_REGION', 'us-east-1') # 从环境变量中获取AWS区域
-
-if model_id not in get_model_ids(): # 验证模型存在于配置清单中
-    print(f'Error: Models ID {model_id} in not a valid model ID. Set MODEL_ID env var to one of {get_model_ids()}.')
-    sys.exit(0)
-
-api_request = api_request_list[model_id] # 定义全局的api_request配置表
-config = {
-    'log_level': 'debug',  # One of: info, debug, none
-    'region': aws_region,
-    'bedrock': {
-        'api_request': api_request
-    },
-    'network': {
-        'connect_timeout': 5,  # 连接超时时间（秒）
-        'read_timeout': 10,    # 读取超时时间（秒）
-        'max_retries': 3,      # 最大重试次数
-        'retry_delay': 2       # 重试延迟时间（秒）
-    }
-}
+from .Polly import Reader
+from .config import config
 
 # 初始化AWS服务客户端
 bedrock_runtime = boto3.client(
@@ -160,33 +138,6 @@ class BedrockModelsWrapper:
         printer(f'[DEBUG] {chunk_obj}', 'debug')
         return text
 
-# # 纯字符级的Bedrock_Stream流处理生成器
-# from typing import Generator
-# def StreamHandler(bedrock_stream) -> Generator[str, None, None]:
-#     """
-#     字符级流式处理器
-#     功能：
-#     - 直接逐字符返回原始流内容
-#     - 保持Markdown等结构化文本完整性
-#     - 最低延迟输出
-#     """
-#     try:
-#         for event in bedrock_stream:
-#             if not (chunk := BedrockModelsWrapper.get_stream_chunk(event)):
-#                 continue
-                
-#             text = BedrockModelsWrapper.get_stream_text(chunk)
-#             if not text:
-#                 continue
-
-#             yield text
-                
-#     except Exception as e:
-#         error_message = f"\n[Stream Error] {str(e)}"
-#         printer(error_message, 'error')
-#         raise
-
-import re
 # 音频生成器函数（支持中英文断句）-> 保留这个名字属实是有点传承的意味了（笑）
 def to_audio_generator(bedrock_stream):
     prefix = ''
@@ -216,13 +167,7 @@ def to_audio_generator(bedrock_stream):
 
         print('\n')
 
-
 class BedrockWrapper:
-    """
-    Amazon Bedrock封装类
-    功能描述：调用Bedrock模型并处理响应
-    """
-
     def __init__(self):
         """
         初始化Amazon Bedrock封装类
@@ -236,18 +181,13 @@ class BedrockWrapper:
         """
         return self.speaking
 
-    def invoke_bedrock(self, text, dialogue_list = [], images = []):
+    def invoke_bedrock(self, text, dialogue_list=[], images=[]):
         """
-        调用Bedrock模型
-        功能描述：调用Bedrock模型并处理响应
-        :param text: 输入文本
-        :param dialogue_list: 对话历史列表
-        :param images: 图片列表
-        :return: 输出文本
+        流式调用Bedrock模型，边生成边yield文本块
         """
         printer('[DEBUG] Bedrock generation started', 'debug')
         self.speaking = True
-        
+
         body = BedrockModelsWrapper.define_body(text, dialogue_list, images)
         printer(f"[DEBUG] Request body: {body}", 'debug')
 
@@ -260,40 +200,36 @@ class BedrockWrapper:
                 contentType=config['bedrock']['api_request']['contentType']
             )
 
-            printer('[DEBUG] Capturing Bedrocks response/bedrock_stream', 'debug')
             bedrock_stream = response.get('body')
             printer(f"[DEBUG] Bedrock_stream: {bedrock_stream}", 'debug')
 
             audio_gen = to_audio_generator(bedrock_stream)
             printer('[DEBUG] Created bedrock stream to audio generator', 'debug')
 
-            response_text = ''
             for audio in audio_gen:
-                print(audio, end="")
-                response_text += audio
+                printer(f'[DEBUG] audio: {audio}','debug')
+                yield audio  # ⭐ 每段话都 yield 出去，调用方可以逐段接收
 
         except Exception as e:
             printer(f'[ERROR] {str(e)}', 'info')
             time.sleep(config['network']['retry_delay'])
             self.speaking = False
-            # 发生异常时尝试重试
+
             if "timeout" in str(e).lower():
                 printer('[INFO] Timeout detected, attempting retry...', 'info')
-                return self.invoke_bedrock(text, dialogue_list, images)
+                # ⚠️ 注意：递归生成器必须用 yield from
+                yield from self.invoke_bedrock(text, dialogue_list, images)
 
         time.sleep(1)
         self.speaking = False
         printer('\n[DEBUG] Bedrock generation completed', 'debug')
-        return response_text
 
     def invoke_voice(self, text, dialogue_list = [], images = []):
         """
         调用Bedrock模型
         功能描述：调用Bedrock模型并处理响应
         :param text: 输入文本
-        :param dialogue_list: 对话历史列表
-        :param images: 图片列表
-        :return: 输出文本
+        :return:
         """
         printer('[DEBUG] Bedrock generation started', 'debug')
         self.speaking = True
@@ -321,7 +257,6 @@ class BedrockWrapper:
             response_text = ''
             print("[Assistant]:",end="")
             for audio in audio_gen:
-                print(audio,end="")
                 reader.read(audio) # 没有读出来是为何🤔
                 response_text += audio
 
@@ -341,7 +276,7 @@ class BedrockWrapper:
 
 def printer(text: str, level: str) -> None:
     """
-    打印日志信息
+    打印日志信息（要打印到日志系统啊😂
     功能描述：根据日志级别打印信息，错误信息重定向到 stderr
     :param text: 要打印的文本
     :param level: 日志级别（info或debug）
@@ -352,22 +287,3 @@ def printer(text: str, level: str) -> None:
         print(text)
     elif config['log_level'] == 'debug' and level in ['info', 'debug']:
         print(text)
-
-if __name__ == '__main__':
-    history = [] # 存储对话历史的列表
-    bedrock_wrapper = BedrockWrapper() 
-    try:
-        while True:
-            if not bedrock_wrapper.is_speaking():
-                input_text = input("[Please Input]：")
-                if len(input_text) != 0:
-                    request_text = input_text
-                    printer(f'\n[INFO] request_text: {request_text}', 'info')
-
-                    return_output = bedrock_wrapper.invoke_bedrock(request_text, dialogue_list=history, images=[])
-
-                    history.append({"role":"user","content":[{ "type": "text","text": input_text}]})
-                    history.append({"role":"assistant","content":[{ "type": "text","text": return_output}]})
-    finally:
-        pass
-

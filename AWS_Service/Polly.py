@@ -2,28 +2,7 @@ import os
 import time
 import boto3
 import pyaudio
-
-aws_region = os.getenv('AWS_REGION', 'us-east-1')
-
-# 定义语音列表
-voiceLanguageList = ['cmn-CN', 'en-US', 'ja-JP', 'ko-KR']
-voiceNameList = ['Zhiyu', 'Ivy', 'Takumi', 'Seoyeon']
-voicePromptList = ['Chinese', 'English', 'Japanese', 'Korean']
-
-# 默认配置为中文
-voiceIndex = 0
-
-config = {
-    'log_level': 'none',  # One of: info, debug, none
-    #'last_speech': "If you have any other questions, please don't hesitate to ask. Have a great day!",
-    'region': aws_region,
-    'polly': {
-        'Engine': 'neural',
-        'LanguageCode': voiceLanguageList[voiceIndex],
-        'VoiceId':voiceNameList[voiceIndex],
-        'OutputFormat': 'pcm',
-    }
-}
+from AWS_Service.config import config
 
 # 初始化PyAudio和AWS服务客户端
 p = pyaudio.PyAudio()

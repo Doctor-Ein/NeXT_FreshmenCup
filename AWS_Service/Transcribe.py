@@ -1,4 +1,4 @@
-import os
+import sys
 import asyncio
 import sounddevice
 from concurrent.futures import ThreadPoolExecutor
@@ -7,18 +7,9 @@ from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent, TranscriptResultStream
 from AWS_Service.BedrockWrapper import BedrockWrapper
+from AWS_Service.config import config
 
-# 支持的语言列表：中文、英语、日语、韩语
-# 注意：这里使用的是Transcribe的语言代码，与Polly的语言代码可能不同
-voiceLanguageList = ['cmn-CN', 'en-US', 'ja-JP', 'ko-KR']
-
-# 默认配置为中文（voiceLanguageList[0]）
-voiceIndex = 0
-
-# 初始化AWS Transcribe服务客户端
-# 从环境变量获取AWS区域，默认为us-east-1
-aws_region = os.getenv('AWS_REGION', 'us-east-1')
-transcribe_streaming = TranscribeStreamingClient(region=aws_region)
+transcribe_streaming = TranscribeStreamingClient(region=config['region'])
 
 class TranscribeHandler(TranscriptResultStreamHandler):
     text = []
@@ -192,7 +183,7 @@ class TranscribeService:
         使用较大的音频块进行处理，适合一般的转录任务
         """
         self.mic_stream = MicStream(is_continuous=False)
-        lc = voiceLanguageList[voiceIndex]
+        lc = config['polly']['LanguageCode']
         if lc == 'cmn-CN':  # 为中文特判，因为Transcribe和Polly的配置代码不一样😭
             lc = 'zh-CN'
 
@@ -218,7 +209,7 @@ class TranscribeService:
         self.is_continuous = True
         self.mic_stream = MicStream(is_continuous=True)
         
-        lc = voiceLanguageList[voiceIndex]
+        lc = config['polly']['LanguageCode']
         if lc == 'cmn-CN':  # 为中文特判，因为Transcribe和Polly的配置代码不一样😭
             lc = 'zh-CN'
 
