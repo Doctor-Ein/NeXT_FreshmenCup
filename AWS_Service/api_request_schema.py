@@ -33,8 +33,8 @@ api_request_list = {
         "accept": "*/*",
         "body": {
             "messages": "",
-            "max_tokens": 2048,
-            "temperature": 0.2,
+            "max_tokens": 512,
+            "temperature": 0,
             "top_k": 250,
             "top_p": 1,
             "stop_sequences": [
