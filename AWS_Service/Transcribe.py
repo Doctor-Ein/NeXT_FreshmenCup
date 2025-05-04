@@ -1,6 +1,6 @@
-import sys
 import asyncio
 import sounddevice
+import sys
 from concurrent.futures import ThreadPoolExecutor
 
 from amazon_transcribe.client import TranscribeStreamingClient
@@ -11,106 +11,164 @@ from AWS_Service.config import config
 
 transcribe_streaming = TranscribeStreamingClient(region=config['region'])
 
+class TranscribeService:
+    """AWS Transcribe服务的主要接口类（仅支持连续转录模式）"""
+
+    def __init__(self, bedrock_wrapper: BedrockWrapper, loop: asyncio.AbstractEventLoop):
+        self.bedrock_wrapper = bedrock_wrapper
+        self.loop = loop
+        self.is_continuous = False
+        self.is_paused = False  # 新增：暂停标志
+        self.mic_stream = None
+        self.handler = None
+        self.stream = None
+        self.continuous_task = None
+
+    async def start_continuous_transcribe(self):
+        """启动连续转录服务"""
+        if self.is_continuous:
+            print("[Debug]: 连续转录服务已在运行中")
+            return
+
+        self.is_continuous = True
+        self.mic_stream = MicStream(loop=self.loop, is_continuous=True)
+
+        lc = config['polly']['LanguageCode']
+        if lc == 'cmn-CN': # 为中文特判，因为Transcribe和Polly的代码不一致
+            lc = 'zh-CN'
+
+        # 启动 Transcribe 流
+        self.stream = await transcribe_streaming.start_stream_transcription(
+            language_code=lc,
+            media_sample_rate_hz=16000,
+            media_encoding="pcm",
+        )
+        
+        self.handler = TranscribeHandler(self.stream.output_stream, self.bedrock_wrapper, self.loop)
+
+        # 创建连续处理任务
+        self.continuous_task = asyncio.gather(
+            self.write_chunks_task(),
+            self.handler.handle_events()  # AWS自带的一个函数
+        )
+
+    async def stop_continuous_transcribe(self):
+        """停止连续转录服务"""
+        if not self.is_continuous:
+            print("[Debug]: 连续转录服务未在运行")
+            return
+
+        self.is_continuous = False
+        self.mic_stream.stop()
+
+        if self.continuous_task:
+            try:
+                await self.continuous_task
+            except Exception as e:
+                print(f"[Error]: 停止连续转录时发生错误: {e}")
+            finally:
+                self.continuous_task = None
+                self.stream = None
+                self.handler = None
+                self.mic_stream = MicStream(loop=self.loop)
+
+    async def write_chunks_task(self):
+        """音频块处理任务"""
+        await self.mic_stream.write_chunks(self.stream)
+
+    def pause(self):
+        """暂停转录服务"""
+        self.is_paused = True
+        if self.handler:
+            self.handler.paused = True
+        print("[Debug]: 转录服务已暂停")
+
+    def resume(self):
+        """恢复转录服务"""
+        self.is_paused = False
+        if self.handler:
+            self.handler.paused = False
+        print("[Debug]: 转录服务已恢复")
+    
+    async def get_transcript(self):
+        """从队列中获取当前的转录文本"""
+        if self.handler:
+            # 直接使用 await 获取队列中的转录文本
+            return await self.handler.get_transcript_from_queue()
+        return None
+
 class TranscribeHandler(TranscriptResultStreamHandler):
+    """处理AWS Transcribe服务返回的转录结果"""
+
     text = []
     history = []
-    last_time = 0
     sample_count = 0
     max_sample_counter = 4
+    paused = False  # 确保初始化paused属性
 
-    """处理AWS Transcribe服务返回的转录结果
-    
-    继承自TranscriptResultStreamHandler，用于处理实时语音转录流
-    使用asyncio.Queue在异步环境中传递转录结果
-    """
-    def __init__(self, transcript_result_stream: TranscriptResultStream, bedrock_wrapper: BedrockWrapper, loop):
+    def __init__(self, transcript_result_stream, bedrock_wrapper: BedrockWrapper, loop: asyncio.AbstractEventLoop):
         super().__init__(transcript_result_stream)
         self.transcript_queue = asyncio.Queue(maxsize=10)  # 限制队列大小
-        self.last_partial = ""  # 用于跟踪部分结果
         self.bedrock = bedrock_wrapper
         self.loop = loop
-        
+
     async def handle_transcript_event(self, transcript_event: TranscriptEvent):
-        """处理转录事件的回调方法
+        """处理转录事件的回调方法"""
+        if self.paused:
+            return  # 暂停状态时跳过处理
 
-        Args:
-            transcript_event: AWS Transcribe服务返回的转录事件
-        处理流程：
-            1. 获取转录结果
-            2. 过滤出非部分结果（完整的语音片段）
-            3. 将转录文本放入异步队列
-        """
-        if not self.bedrock.speaking:
-            printer("[Debug]:处理转录事件中...", "debug")
-            results = transcript_event.transcript.results
-            if results:
-                for result in results:
-                    if not result.is_partial:  # 只处理完整的转录结果
-                        # 输出转录文本
-                        for alt in result.alternatives:
-                            self.transcript_queue.put_nowait(alt.transcript) # 放入队列中🤔
-                            TranscribeHandler.text.append(alt.transcript)  # 存储转录结果到缓存
-            else:                
-                # 增加样本计数
-                TranscribeHandler.sample_count += 1  # 增加计数
-                
-                # 每隔一段时间或者样本计数达到上限时，提交文本
-                if TranscribeHandler.sample_count >= TranscribeHandler.max_sample_counter:
-
-                    if len(TranscribeHandler.text)!=0 :
-                        input_text = ' '.join(TranscribeHandler.text)
+        results = transcript_event.transcript.results
+        if results:
+            for result in results:
+                TranscribeHandler.sample_count = 0
+                if not result.is_partial:  # 只处理完整的转录结果
+                    for alt in result.alternatives:
+                        await self.transcript_queue.put(alt.transcript)  # 放入队列
                         
-                        # 执行文本提交到 BedrockWrapper
-                        executor = ThreadPoolExecutor(max_workers=1)
-                        self.loop.run_in_executor(
-                            executor,
-                            self.bedrock.invoke_voice,  # 这里调用模型
-                            input_text,
-                            TranscribeHandler.history  # 传递历史记录
-                        )
+                        # 每隔一定时间或达到样本计数上限时提交文本
+                        TranscribeHandler.text.append(alt.transcript)
+        else:
+            TranscribeHandler.sample_count += 1
+            if TranscribeHandler.sample_count >= TranscribeHandler.max_sample_counter:
+                input_text = ' '.join(TranscribeHandler.text)
 
-                        # 清空文本缓存，准备接收下一次转录
-                        TranscribeHandler.text.clear()
-                        TranscribeHandler.sample_count = 0  # 重置样本计数
+                if len(input_text)!=0:
+                    self.loop.run_in_executor(
+                        ThreadPoolExecutor(),
+                        self.bedrock.invoke_voice,
+                        input_text,
+                        TranscribeHandler.history
+                    )
 
+                # 清空缓存
+                TranscribeHandler.text.clear()
+                TranscribeHandler.sample_count = 0
 
-        # results = transcript_event.transcript.results
-        # if results:
-        #     for result in results:
-        #         for alt in result.alternatives:
-        #             if not result.is_partial:
-        #                 # 完整结果，清除部分结果记录
-        #                 self.last_partial = ""
-        #                 await self.transcript_queue.put(alt.transcript)
-                    # if result.is_partial:
-                    #     # 只有当新的部分结果与上一个不同时才发送
-                    #     if alt.transcript != self.last_partial:
-                    #         self.last_partial = alt.transcript
-                    #         await self.transcript_queue.put(alt.transcript)
-                    # else:
-                    #     # 完整结果，清除部分结果记录
-                    #     self.last_partial = ""
-                    #     await self.transcript_queue.put(alt.transcript)
+    async def get_transcript_from_queue(self):
+        """从队列中获取转录文本"""
+        if not self.transcript_queue.empty():
+            return await self.transcript_queue.get()
+        return None  # 如果队列为空，则返回 None
+
 
 class MicStream:
     """处理麦克风输入流"""
-    def __init__(self, is_continuous=False):
+
+    def __init__(self, loop ,is_continuous=False):
         self.is_running = True
         self.is_continuous = is_continuous
-        # 优化块大小和采样率
         self.block_size = 512  # 更小的块以减少延迟
-        self.samplerate = 16000  # 更高采样率（需与AWS参数匹配）
+        self.samplerate = 16000  # 采样率与 AWS 匹配
+        self.loop = loop
 
     async def mic_stream(self):
-        """创建麦克风输入流"""
-        loop = asyncio.get_event_loop()
-        input_queue = asyncio.Queue(maxsize=2)  # 限制队列大小以减少延迟
+        """创建麦克风输入流"""  
+        input_queue = asyncio.Queue(maxsize=2)
 
-        def callback(indata, frame_count, time_info, status): # 回调函数：向输入队列中插入数据和状态的元组
+        def callback(indata, frame_count, time_info, status):
             try:
-                loop.call_soon_threadsafe(input_queue.put_nowait, (bytes(indata), status))
+                self.loop.call_soon_threadsafe(input_queue.put_nowait, (bytes(indata), status))
             except asyncio.QueueFull:
-                # 如果队列满了，丢弃最旧的数据
                 pass
 
         # 配置音频输入流
@@ -120,9 +178,9 @@ class MicStream:
             callback=callback,
             blocksize=self.block_size,
             dtype="int16",
-            latency='low'  # 使用低延迟模式
+            latency='low'
         )
-        
+
         with stream:
             while self.is_running:
                 try:
@@ -133,15 +191,7 @@ class MicStream:
                     continue
 
     async def write_chunks(self, stream):
-        """将音频数据写入AWS Transcribe流
-
-        Args:
-            stream: AWS Transcribe服务的音频流对象
-        流程：
-            1. 从麦克风流中获取音频数据
-            2. 发送到AWS Transcribe服务
-            3. 当停止时关闭流
-        """
+        """将音频数据写入 AWS Transcribe 流"""
         async for chunk, status in self.mic_stream():
             if self.is_running:
                 await stream.input_stream.send_audio_event(audio_chunk=chunk)
@@ -150,162 +200,6 @@ class MicStream:
     def stop(self):
         """停止麦克风输入流"""
         self.is_running = False
-
-class TranscribeService:
-    """AWS Transcribe服务的主要接口类
-
-    提供：
-        1. 语音转录服务的启动和停止
-        2. 转录文本的获取
-        3. 语言切换功能
-        4. 连续音频流的控制
-        5. 网页接口的异步生成器
-    """
-    def __init__(self, bedrock_wrapper, loop, language_index=0):
-        """初始化转录服务
-
-        Args:
-            language_index: 语言索引，默认为0（中文）
-        """
-        global voiceIndex
-        voiceIndex = language_index
-        self.mic_stream = None  # 延迟初始化
-        self.handler = None
-        self.stream = None
-        self.continuous_task = None
-        self.is_continuous = False
-        self.bedrock_wrapper = bedrock_wrapper
-        self.loop = loop
-
-    async def start_transcribe(self):
-        """启动转录服务（普通模式）
-        
-        使用较大的音频块进行处理，适合一般的转录任务
-        """
-        self.mic_stream = MicStream(is_continuous=False)
-        lc = config['polly']['LanguageCode']
-        if lc == 'cmn-CN':  # 为中文特判，因为Transcribe和Polly的配置代码不一样😭
-            lc = 'zh-CN'
-
-        self.stream = await transcribe_streaming.start_stream_transcription(
-            language_code=lc,
-            media_sample_rate_hz=16000,
-            media_encoding="pcm",
-        )
-        
-        self.handler = TranscribeHandler(self.stream.output_stream, self.bedrock_wrapper, self.loop)
-        asyncio.create_task(self.write_chunks_task())
-        asyncio.create_task(self.handler.handle_events())
-
-    async def start_continuous_transcribe(self):
-        """启动连续转录服务
-        
-        使用更小的音频块和更快的处理策略，适合实时语音输入场景
-        """
-        if self.is_continuous:
-            print("连续转录服务已经在运行中")
-            return
-
-        self.is_continuous = True
-        self.mic_stream = MicStream(is_continuous=True)
-        
-        lc = config['polly']['LanguageCode']
-        if lc == 'cmn-CN':  # 为中文特判，因为Transcribe和Polly的配置代码不一样😭
-            lc = 'zh-CN'
-
-        # 启动Transcribe的流，使用优化的配置
-        self.stream = await transcribe_streaming.start_stream_transcription(
-            language_code=lc,
-            media_sample_rate_hz=16000,
-            media_encoding="pcm",
-        )
-        
-        self.handler = TranscribeHandler(self.stream.output_stream, self.bedrock_wrapper, self.loop)
-        
-        # 创建连续处理的任务
-        self.continuous_task = asyncio.gather(
-            self.write_chunks_task(),
-            self.handler.handle_events()  # AWS自带的一个函数
-        )
-
-    async def stop_continuous_transcribe(self):
-        """停止连续转录服务
-        
-        优雅地关闭连续转录服务，确保资源正确释放
-        """
-        if not self.is_continuous:
-            print("连续转录服务未在运行")
-            return
-
-        self.is_continuous = False
-        self.mic_stream.stop()
-        
-        if self.continuous_task:
-            try:
-                await self.continuous_task
-            except Exception as e:
-                print(f"停止连续转录时发生错误: {e}")
-            finally:
-                self.continuous_task = None
-                self.stream = None
-                self.handler = None
-                # 重新初始化MicStream以备下次使用
-                self.mic_stream = MicStream()
-
-    async def write_chunks_task(self):
-        """音频块处理任务  
-
-        Args:
-            self: 当前实例
-        将麦克风输入的音频数据写入AWS Transcribe流
-        """
-        await self.mic_stream.write_chunks(self.stream)
-
-    async def get_transcript(self):
-        """获取转录文本
-
-        Returns:
-            str: 转录的文本字符串
-            None: 如果处理器未初始化
-        Note:
-            这是一种异步方法，将等待到新的转录文本到达
-        """
-        if self.handler:
-            return await self.handler.transcript_queue.get()
-        return None
-
-    def stop(self):
-        """停止转录服务：停止麦克风输入流，从而触发服务的正常关闭"""
-        if self.mic_stream:
-            self.mic_stream.stop()
-
-    async def change_language(self, language='zh'):
-        """更改转录服务的语言
-        
-        Args:
-            language: 语言代码，支持 'zh'(中文), 'en'(英语), 'ja'(日语), 'ko'(韩语)
-        """
-        language_map = {
-            'zh': 0,
-            'en': 1,
-            'ja': 2,
-            'ko': 3
-        }
-        
-        if language not in language_map:
-            raise ValueError(f"不支持的语言代码: {language}。支持的语言代码: {list(language_map.keys())}")
-
-        # 如果服务正在运行，需要先停止
-        was_running = self.is_continuous
-        if was_running:
-            await self.stop_continuous_transcribe()
-        
-        global voiceIndex
-        voiceIndex = language_map[language]
-        
-        # 如果之前在运行，重新启动服务
-        if was_running:
-            await self.start_continuous_transcribe()
 
 def printer(text: str, level: str) -> None:
     """

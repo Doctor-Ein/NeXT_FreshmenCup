@@ -153,7 +153,6 @@ def to_audio_generator(bedrock_stream):
                 if sentences:
                     # 找到完整句子后，逐句生成
                     for sent in sentences:
-                        print(sent, flush=True, end='')
                         yield sent
                     # 将未结束的部分存入 prefix
                     prefix = sentence_end_pattern.sub('', full_text)
@@ -257,8 +256,11 @@ class BedrockWrapper:
             response_text = ''
             print("[Assistant]:",end="")
             for audio in audio_gen:
+                print(audio,end='',flush=False)
                 reader.read(audio) # 没有读出来是为何🤔
                 response_text += audio
+
+            reader.close()
 
         except Exception as e:
             printer(f'[ERROR] {str(e)}', 'info')
