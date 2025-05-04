@@ -28,21 +28,16 @@ def process_content_list_docs(
     content_list_path: str,
     chunk_size: int = 300,
     chunk_overlap: int = 34,
-) -> tuple[list, list]:
+) -> tuple[list, list, list]:
     """
-    1. 读取 MinerU 导出的 content_list.json
-    2. 以每个 layout-block 为单元生成初始 chunk
-    3. type=='text' 的块：
-        - 如果过长，使用 TokenTextSplitter 二次分割
-        - 返回 text_chunks：列表元素为 {'text', 'metadata'}
-    4. type in ('equation','table') 的块：
-        - 直接加入 raw_data：{'type','metadata','content'}
-        - 不做嵌入
-    5. 返回 (text_chunks, raw_data)
+    处理 content_list.json:
+    - 解析 text 块并切分为 text_chunks（用于嵌入）
+    - 保留 equation、table、image 等 block 为 raw_data（带 metadata）
+    - 所有 blocks 都返回为 all_blocks，用于数据库保存或 UI 展示
     """
     path = Path(content_list_path)
     if not path.is_file():
-        raise FileNotFoundError(f"找不到 content_list.json: {content_list_path}")
+        raise FileNotFoundError(f"❌ 找不到 content_list.json: {content_list_path}")
 
     data = json.loads(path.read_text(encoding='utf-8'))
     print(f"🔍 读取到 {len(data)} 个布局块")
@@ -57,65 +52,85 @@ def process_content_list_docs(
     file_name = path.stem.replace('_content_list', '')
     text_chunks = []
     raw_data    = []
+    all_blocks  = []
 
     for block_id, block in enumerate(data):
-        btype = block.get('type')
+        btype = block.get('type', 'text')
         page  = block.get('page_idx', 0)
 
-        # ----- 纯文本分块 -----
+        # 补充元数据
+        metadata = {
+            'file_name': file_name,
+            'page': page,
+            'block_id': block_id,
+            'type': btype
+        }
+
+        # ----- 处理纯文本 -----
         if btype == 'text':
             raw_text = block.get('text', '').strip()
-            if not raw_text:
-                continue
+            if raw_text:
+                # 是否需要分块
+                subs = (
+                    splitter.split_text(raw_text)
+                    if len(raw_text.split()) > chunk_size
+                    else [raw_text]
+                )
+                for idx, sub in enumerate(subs):
+                    text_chunks.append({
+                        'text': sub,
+                        'metadata': {
+                            **metadata,
+                            'chunk_id': f"{block_id}_chunk_{idx}",
+                            'chunk_index': idx
+                        }
+                    })
 
-            # 分块逻辑
-            subs = (
-                splitter.split_text(raw_text)
-                if len(raw_text.split()) > chunk_size
-                else [raw_text]
-            )
-            for idx, sub in enumerate(subs):
-                text_chunks.append({
-                    'text': sub,
-                    'metadata': {
-                        'file_name': file_name,
-                        'page': page,
-                        'block_id': block_id,
-                        'chunk_id': f"{block_id}_chunk_{idx}",
-                        'chunk_index': idx
-                    }
+                # 全体块也加入
+                all_blocks.append({
+                    'metadata': metadata,
+                    'content': {'text': raw_text}
                 })
 
-        # ----- 公式、表格作为 RawData -----
-        elif btype in ('equation', 'table'):
+        # ----- equation -----
+        elif btype == 'equation':
             entry = {
                 'type': btype,
-                'metadata': {
-                    'file_name': file_name,
-                    'page': page,
-                    'block_id': block_id,
-                }
-            }
-            if btype == 'equation':
-                entry['content'] = {
+                'metadata': metadata,
+                'content': {
                     'text_format': block.get('text_format', ''),
                     'latex': block.get('text', '')
                 }
-            else:  # table
-                entry['content'] = {
+            }
+            raw_data.append(entry)
+            all_blocks.append(entry)
+
+        # ----- table -----
+        elif btype == 'table':
+            entry = {
+                'type': btype,
+                'metadata': metadata,
+                'content': {
                     'caption': block.get('table_caption', []),
                     'footnote': block.get('table_footnote', []),
-                    'html':     block.get('table_body', ''),
-                    # 可选：img_path = block.get('img_path')
+                    'html': block.get('table_body', '')
                 }
+            }
             raw_data.append(entry)
+            all_blocks.append(entry)
 
-        # 其余（image 等）忽略
+        # ----- 其他类型：image、figure 等 -----
         else:
-            continue
+            entry = {
+                'type': btype,
+                'metadata': metadata,
+                'content': block  # 保留原始内容字段
+            }
+            all_blocks.append(entry)
 
-    print(f"✅ 生成 {len(text_chunks)} 条文本 chunk，{len(raw_data)} 条 RawData 条目")
-    return text_chunks, raw_data
+    print(f"✅ 生成 {len(text_chunks)} 条文本 chunk，{len(raw_data)} 条 RawData 条目，{len(all_blocks)} 条完整块")
+    return text_chunks, raw_data, all_blocks
+
 
 def create_milvus_collection(collection_name: str):
     if utility.has_collection(collection_name):
@@ -159,7 +174,7 @@ def store_in_milvus(chunks: list):
 if __name__ == '__main__':
     try:
         # 1. 读取并分块（文本 chunks + RawData）
-        text_chunks, raw_data = process_content_list_docs(content_list_path=CONTENT_LIST_JSON)
+        text_chunks, raw_data, all_blocks = process_content_list_docs(content_list_path=CONTENT_LIST_JSON)
 
         # 2. 确保输出目录存在
         out_dir = Path('./JsonDataBase')
@@ -174,11 +189,17 @@ if __name__ == '__main__':
         raw_data_path = out_dir / 'raw_data.json'
         with open(raw_data_path, 'w', encoding='utf-8') as f:
             json.dump(raw_data, f, ensure_ascii=False, indent=2)
+        
+        # 5. 保存 all_blocks 到 JSON
+        all_blocks_path = out_dir / 'content_list.json'
+        with open(all_blocks_path, 'w', encoding='utf-8') as f:
+            json.dump(all_blocks, f, ensure_ascii=False, indent=2)
 
         print(f"✅ 已将 {len(text_chunks)} 条文本 chunks 保存到 {text_chunks_path}")
         print(f"✅ 已将 {len(raw_data)} 条 RawData 条目保存到 {raw_data_path}")
+        print(f"✅ 已将 {len(all_blocks)} 条 all blocks 条目保存到 {all_blocks_path}")
 
-        # 5. （可选）将文本 chunks 存入 Milvus
+        # 6. 将文本 chunks 存入 Milvus
         store_in_milvus(text_chunks)
 
     except Exception as e:

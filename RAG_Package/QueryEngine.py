@@ -1,88 +1,131 @@
 import json
 from pathlib import Path
-
 from pymilvus import MilvusClient
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false" # 禁止Tokenizer的并行化
 
 # 配置
 MILVUS_URI = "http://0.0.0.0:19530"
 COLLECTION_NAME = "DL_KDB"
-MODEL_PATH      = "./local_models/bge-m3"
-CONTENT_JSON    = "./Data/Paper/MinerU_Res/AlexNet/AlexNet_content_list.json"
-TOP_K           = 5
+MODEL_PATH = "./local_models/bge-m3"
+TOP_K = 5
+RAW_DATA_JSON = './JsonDataBase/raw_data.json'  # 你之前保存的那个
 
 # 客户端与模型
 client    = MilvusClient(uri=MILVUS_URI)  
 embedder = HuggingFaceEmbedding(model_name=MODEL_PATH)
+
+def load_blocks_from_jsondb(json_path: str) -> list:
+    path = Path(json_path)
+    if not path.exists():
+        raise FileNotFoundError(f"❌ 找不到 raw_data.json: {json_path}")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data
 
 class QueryEngine:
     def __init__(self, milvus_client, embedder, collection, blocks):
         self.client     = milvus_client
         self.embedder   = embedder
         self.collection = collection
-        self.blocks     = blocks            # list of dict with metadata & content
-        # 按 (file_name, block_id) 建索引
+        self.blocks     = blocks
+
+        self.file_block_map = {}
+        for blk in blocks:
+            fname = blk['metadata']['file_name']
+            self.file_block_map.setdefault(fname, []).append(blk)
+
+        for fname, blist in self.file_block_map.items():
+            blist.sort(key=lambda b: int(b['metadata']['block_id']))
+            print(f"[DEBUG] 加载文件 {fname} 的块数: {len(blist)}")  # [DEBUG]
+
         self.index = {
-            (b["metadata"]["file_name"], b["metadata"]["block_id"]): b
-            for b in blocks
+            (blk["metadata"]["file_name"], int(blk["metadata"]["block_id"])): blk
+            for blk in blocks
         }
 
     def query(self, text_query: str, top_k: int = TOP_K):
-        # 1. 嵌入查询
-        q_vec = self.embedder.get_text_embedding(text_query)  :contentReference[oaicite:3]{index=3}
+        q_vec = self.embedder.get_text_embedding(text_query)
 
-        # 2. Milvus 检索
         res = self.client.search(
-            collection_name=COLLECTION_NAME,
+            collection_name=self.collection,
             data=[q_vec],
             anns_field="vector",
-            search_params={"metric_type": "L2", "params": {}},
+            search_params={"metric_type": "L2", "params": {'nlist':480}},
             limit=top_k,
-            output_fields=["metadata"]  # metadata 包含 file_name, page, block_id :contentReference[oaicite:4]{index=4}
+            output_fields=["text", "metadata"]
         )
 
         results = []
         for hits in res:
             for hit in hits:
                 m = hit["entity"]["metadata"]
-                key = (m["file_name"], m["block_id"])
-                # 3. 主体块
-                main = {
-                    "metadata": m,
-                    "text": self.index[key]["content"].get("text", "")
-                }
-                # 4. 邻近块（前一、后一）
+                fname, blk_id = m["file_name"], int(m["block_id"])
+                main = hit['entity']['text']
+                if not main:
+                    continue
+
+                print(f"\n[DEBUG] 命中块: file={fname}, block_id={blk_id}")  # [DEBUG]
+
+                if fname not in self.file_block_map:
+                    print(f"[WARNING] file_name '{fname}' 不在 file_block_map 中！")  # [DEBUG]
+                    continue
+
+                all_blks = self.file_block_map[fname]
                 adj = []
-                for nbr in (m["block_id"] - 1, m["block_id"] + 1):
-                    nbr_key = (m["file_name"], nbr)
-                    if nbr_key in self.index:
-                        nb = self.index[nbr_key]
-                        adj.append({
-                            "metadata": nb["metadata"],
-                            "type": nb["metadata"]["type"],
-                            "content": nb["content"]
-                        })
-                results.append({"main": main, "adjacent": adj})
+
+                flag1 = False
+                flag2 = False
+                for i, b in enumerate(all_blks):
+                    bid = int(b["metadata"]["block_id"])
+                    if bid == blk_id + 1:
+                        print(f"[DEBUG] 匹配到块索引: i={i}, block_id={bid}")  # [DEBUG]
+                        if i < len(all_blks) - 1:
+                            adj.append(all_blks[i + 1])
+                            flag1 = True
+                    if bid == blk_id - 1:
+                        print(f"[DEBUG] 匹配到块索引: i={i}, block_id={bid}")  # [DEBUG]
+                        if i > 0:
+                            adj.append(all_blks[i - 1])
+                            flag2 = True
+                    if flag1 and flag2:
+                        break
+
+                if not adj:
+                    print(f"[DEBUG] ❌ 找不到邻接块，使用默认")  # [DEBUG]
+                    adj = [{"type": "text", "block_id": -1, "text": "[No Adjacent]"}]
+
+                results.append({
+                    "main": main,
+                    "adjacent": adj
+                })
         return results
 
+
 if __name__ == "__main__":
-    # 初始化引擎
+    print("📦 向量库总量：", client.get_collection_stats(collection_name=COLLECTION_NAME))
+    blocks = load_blocks_from_jsondb(RAW_DATA_JSON)
+
     engine = QueryEngine(
         milvus_client=client,
         embedder=embedder,
         collection=COLLECTION_NAME,
-        blocks=all_blocks
+        blocks=blocks
     )
 
-    # 用户输入
     query_str = input("Enter your query: ")
+    print(f'[INFO] query_str: {query_str}')
     out = engine.query(query_str, top_k=5)
 
-    # 打印结果
-    for i, item in enumerate(out, 1):
-        m = item["main"]["metadata"]
-        print(f"\nResult {i}: File={m['file_name']} Page={m['page']} Block={m['block_id']}")
-        print("Text:", item["main"]["text"])
+    for item in out:
+        print(item['main'],end='\n\n')
+
         for adj in item["adjacent"]:
-            am = adj["metadata"]
-            print(f"  ↳ Adjacent ({adj['type']}), Block={am['block_id']}: {adj['content']}")
+            type = adj.get("type", "unknown")
+            block_id = adj.get("block_id", "?")
+            print(f"  ↳ Adjacent ({type}), Block={block_id}:")
+            if type == "text":
+                print("    Text:", adj.get("text", "[No Text]"))
+            else:
+                print("    Content:", adj.get("content", "[No Content]"))
