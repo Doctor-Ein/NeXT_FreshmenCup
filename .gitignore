@@ -1,8 +1,5 @@
 .DS_Store
 __pycache__/
-models/
-test*
 local_models/
 Data/
-MD/
-NeXT/
+JsonDataBase/
