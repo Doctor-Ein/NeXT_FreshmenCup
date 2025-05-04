@@ -13,6 +13,9 @@ from pymilvus import (
     utility
 )
 
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false" # 禁用Tokenizer的并行
+
 # -------------------- 配置参数 --------------------
 CONTENT_LIST_JSON = './Data/Paper/MinerU_Res/AlexNet/AlexNet_content_list.json'
 MILVUS_HOST = '0.0.0.0'
@@ -52,7 +55,6 @@ def process_content_list_docs(
     file_name = path.stem.replace('_content_list', '')
     text_chunks = []
     raw_data    = []
-    all_blocks  = []
 
     for block_id, block in enumerate(data):
         btype = block.get('type', 'text')
@@ -86,12 +88,6 @@ def process_content_list_docs(
                         }
                     })
 
-                # 全体块也加入
-                all_blocks.append({
-                    'metadata': metadata,
-                    'content': {'text': raw_text}
-                })
-
         # ----- equation -----
         elif btype == 'equation':
             entry = {
@@ -103,7 +99,6 @@ def process_content_list_docs(
                 }
             }
             raw_data.append(entry)
-            all_blocks.append(entry)
 
         # ----- table -----
         elif btype == 'table':
@@ -117,7 +112,6 @@ def process_content_list_docs(
                 }
             }
             raw_data.append(entry)
-            all_blocks.append(entry)
 
         # ----- 其他类型：image、figure 等 -----
         else:
@@ -126,10 +120,10 @@ def process_content_list_docs(
                 'metadata': metadata,
                 'content': block  # 保留原始内容字段
             }
-            all_blocks.append(entry)
+            raw_data.append(entry)
 
-    print(f"✅ 生成 {len(text_chunks)} 条文本 chunk，{len(raw_data)} 条 RawData 条目，{len(all_blocks)} 条完整块")
-    return text_chunks, raw_data, all_blocks
+    print(f"✅ 生成 {len(text_chunks)} 条文本 chunk，{len(raw_data)} 条 RawData 条目")
+    return text_chunks, raw_data
 
 
 def create_milvus_collection(collection_name: str):
@@ -174,7 +168,7 @@ def store_in_milvus(chunks: list):
 if __name__ == '__main__':
     try:
         # 1. 读取并分块（文本 chunks + RawData）
-        text_chunks, raw_data, all_blocks = process_content_list_docs(content_list_path=CONTENT_LIST_JSON)
+        text_chunks, raw_data = process_content_list_docs(content_list_path=CONTENT_LIST_JSON)
 
         # 2. 确保输出目录存在
         out_dir = Path('./JsonDataBase')
@@ -189,17 +183,11 @@ if __name__ == '__main__':
         raw_data_path = out_dir / 'raw_data.json'
         with open(raw_data_path, 'w', encoding='utf-8') as f:
             json.dump(raw_data, f, ensure_ascii=False, indent=2)
-        
-        # 5. 保存 all_blocks 到 JSON
-        all_blocks_path = out_dir / 'content_list.json'
-        with open(all_blocks_path, 'w', encoding='utf-8') as f:
-            json.dump(all_blocks, f, ensure_ascii=False, indent=2)
 
         print(f"✅ 已将 {len(text_chunks)} 条文本 chunks 保存到 {text_chunks_path}")
         print(f"✅ 已将 {len(raw_data)} 条 RawData 条目保存到 {raw_data_path}")
-        print(f"✅ 已将 {len(all_blocks)} 条 all blocks 条目保存到 {all_blocks_path}")
 
-        # 6. 将文本 chunks 存入 Milvus
+        # 5. 将文本 chunks 存入 Milvus
         store_in_milvus(text_chunks)
 
     except Exception as e:
