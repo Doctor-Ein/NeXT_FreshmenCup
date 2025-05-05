@@ -1,6 +1,6 @@
 import asyncio
 from AWS_Service.Transcribe import TranscribeService  # 假设你把上面代码保存在 TranscribeService.py
-from AWS_Service.BedrockWrapper import BedrockWrapper
+from AWS_Service.BedrockWrapper import BedrockWrapper 
 
 async def run_transcription():
     loop = asyncio.get_event_loop()
@@ -16,10 +16,11 @@ async def run_transcription():
             transcript = await transcriber.get_transcript()
             if transcript:
                 print(f"[User]: {transcript}")
-                transcriber.pause()
+                await transcriber.start()
                 ret = bedrock.invoke_voice(transcript,history)
                 history.append({'role':'user','content':{'type':'text','text':transcript}})
                 history.append({'role':'assistant','content':{'type':'text','text':ret}})
+                await transcriber.stop()
                 transcriber.resume()
             await asyncio.sleep(1)
     except KeyboardInterrupt:
@@ -28,5 +29,13 @@ async def run_transcription():
         await transcriber.stop()
         print("✅ 转录服务已关闭")
 
+def main():
+    bedrock = BedrockWrapper()
+    input_text = input('[Prompt]:')
+    response = bedrock.invoke_model(input_text)
+    print(response)
+
+
 if __name__ == "__main__":
     asyncio.run(run_transcription())
+    # main()

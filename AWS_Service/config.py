@@ -2,7 +2,7 @@ import os
 import sys
 from AWS_Service.api_request_schema import api_request_list, get_model_ids
 
-model_id = os.getenv('MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0') # 从环境变量中获取模型id
+model_id = os.getenv('MODEL_ID', 'anthropic.claude-3-5-sonnet-20240620-v1:0') # 从环境变量中获取模型id
 aws_region = os.getenv('AWS_REGION', 'us-east-1') # 从环境变量中获取AWS区域
 
 if model_id not in get_model_ids(): # 验证模型存在于配置清单中

@@ -27,6 +27,22 @@ api_request_list = {
             }
         }
     },
+    'anthropic.claude-3-5-sonnet-20240620-v1:0':{
+        "modelId": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+        "contentType": "application/json",
+        "accept": "*/*",
+        "body": {
+            "messages": "",
+            "max_tokens": 512,
+            "temperature": 0,
+            "top_k": 250,
+            "top_p": 1,
+            "stop_sequences": [
+                "\n\nHuman:"
+            ],
+            "anthropic_version": "bedrock-2023-05-31"
+        }
+    },
     'anthropic.claude-3-sonnet-20240229-v1:0': {
         "modelId": "anthropic.claude-3-sonnet-20240229-v1:0",
         "contentType": "application/json",

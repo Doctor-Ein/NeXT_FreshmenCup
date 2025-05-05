@@ -276,6 +276,19 @@ class BedrockWrapper:
         printer('\n[DEBUG] Bedrock generation completed', 'debug')
         return response_text
 
+    def invoke_model(self, text, dialogue_list = [], images = []):
+        body = BedrockModelsWrapper.define_body(text, dialogue_list, images)
+        body_json = json.dumps(body)
+        response = bedrock_runtime.invoke_model(
+            body=body_json,
+            modelId=config['bedrock']['api_request']['modelId'],
+            accept=config['bedrock']['api_request']['accept'],
+            contentType=config['bedrock']['api_request']['contentType']
+        )
+
+        response_body = json.loads(response['body'].read())
+        return response_body['content'][0]['text']
+
 def printer(text: str, level: str) -> None:
     """
     打印日志信息（要打印到日志系统啊😂
