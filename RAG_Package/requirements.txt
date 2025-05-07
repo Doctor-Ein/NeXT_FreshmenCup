@@ -5,3 +5,4 @@ transformers>=4.30.0
 torch>=2.0.0 
 llama-index-readers-file>=0.4.7
 torchvision>=0.22.0
+jsonpath-ng>=1.7.0

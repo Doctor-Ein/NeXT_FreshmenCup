@@ -79,14 +79,16 @@ def process_content_list_docs(
                     else [raw_text]
                 )
                 for idx, sub in enumerate(subs):
-                    text_chunks.append({
+                    entry={
                         'text': sub,
                         'metadata': {
                             **metadata,
                             'chunk_id': f"{block_id}_chunk_{idx}",
                             'chunk_index': idx
                         }
-                    })
+                    }
+                    text_chunks.append(entry)
+                    all_contents.append(entry)
 
         # ----- equation -----
         elif btype == 'equation':
@@ -99,6 +101,7 @@ def process_content_list_docs(
                 }
             }
             raw_data.append(entry)
+            all_contents.append(entry)
 
         # ----- table -----
         elif btype == 'table':
@@ -112,6 +115,7 @@ def process_content_list_docs(
                 }
             }
             raw_data.append(entry)
+            all_contents.append(entry)
 
         # ----- 其他类型：image、figure 等 -----
         else:
@@ -121,9 +125,10 @@ def process_content_list_docs(
                 'content': block  # 保留原始内容字段
             }
             raw_data.append(entry)
+            all_contents.append(entry)
 
-    print(f"✅ 生成 {len(text_chunks)} 条文本 chunk，{len(raw_data)} 条 RawData 条目")
-    return text_chunks, raw_data
+    print(f"✅ 生成 {len(text_chunks)} 条文本 chunk，{len(raw_data)} 条 RawData 条目, 总计{len(all_contents)} ")
+    return text_chunks, raw_data,all_contents
 
 
 def create_milvus_collection(collection_name: str):
@@ -168,7 +173,7 @@ def store_in_milvus(chunks: list):
 if __name__ == '__main__':
     try:
         # 1. 读取并分块（文本 chunks + RawData）
-        text_chunks, raw_data = process_content_list_docs(content_list_path=CONTENT_LIST_JSON)
+        text_chunks, raw_data, all_contents = process_content_list_docs(content_list_path=CONTENT_LIST_JSON)
 
         # 2. 确保输出目录存在
         out_dir = Path('./JsonDataBase')
@@ -184,11 +189,17 @@ if __name__ == '__main__':
         with open(raw_data_path, 'w', encoding='utf-8') as f:
             json.dump(raw_data, f, ensure_ascii=False, indent=2)
 
+        # 5. 保存 AllContent 到 JSON
+        all_contents_path = out_dir / 'all_contents.json'
+        with open(all_contents_path, 'w', encoding='utf-8') as f:
+            json.dump(all_contents, f, ensure_ascii=False, indent=2)
+
         print(f"✅ 已将 {len(text_chunks)} 条文本 chunks 保存到 {text_chunks_path}")
         print(f"✅ 已将 {len(raw_data)} 条 RawData 条目保存到 {raw_data_path}")
+        print(f"✅ 已将 {len(all_contents)} 条 RawData 条目保存到 {all_contents_path}")
 
-        # 5. 将文本 chunks 存入 Milvus
-        store_in_milvus(text_chunks)
+        # # 5. 将文本 chunks 存入 Milvus
+        # store_in_milvus(text_chunks)
 
     except Exception as e:
         print(f"处理失败: {e}")

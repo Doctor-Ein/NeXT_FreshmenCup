@@ -56,6 +56,7 @@ def process_content_list_docs(
     file_name = path.stem.replace('_content_list', '')
     text_chunks = []
     raw_data = []
+    all_contents=[]
 
     for block_id, block in enumerate(data):
         btype = block.get('type', 'text')
@@ -76,27 +77,32 @@ def process_content_list_docs(
                     else [raw_text]
                 )
                 for idx, sub in enumerate(subs):
-                    text_chunks.append({
+                    entry={
+                        'type': 'text',
                         'text': sub,
                         'metadata': {
                             **metadata,
                             'chunk_id': f"{block_id}_chunk_{idx}",
                             'chunk_index': idx
                         }
-                    })
+                    }
+                    text_chunks.append(entry)
+                    all_contents.append(entry)
 
         elif btype == 'equation':
-            raw_data.append({
+            entry={
                 'type': btype,
                 'metadata': metadata,
                 'content': {
                     'text_format': block.get('text_format', ''),
                     'latex': block.get('text', '')
                 }
-            })
+            }
+            raw_data.append(entry)
+            all_contents.append(entry)
 
         elif btype == 'table':
-            raw_data.append({
+            entry={
                 'type': btype,
                 'metadata': metadata,
                 'content': {
@@ -104,17 +110,21 @@ def process_content_list_docs(
                     'footnote': block.get('table_footnote', []),
                     'html': block.get('table_body', '')
                 }
-            })
+            }
+            raw_data.append(entry)
+            all_contents.append(entry)
 
         else:
-            raw_data.append({
+            entry={
                 'type': btype,
                 'metadata': metadata,
                 'content': block
-            })
+            }
+            raw_data.append(entry)
+            all_contents.append(entry)
 
     print(f"✅ 从 '{path.name}' 生成 {len(text_chunks)} 文本 chunks，{len(raw_data)} RawData 条目")
-    return text_chunks, raw_data
+    return text_chunks, raw_data, all_contents
 
 
 def process_all_content_lists(
@@ -128,14 +138,16 @@ def process_all_content_lists(
     base_path = Path(content_list_dir)
     all_text_chunks = []
     all_raw_data = []
+    all_contents_data = []
 
     for json_file in base_path.rglob('*_content_list.json'):
-        tc, rd = process_content_list_docs(str(json_file), chunk_size, chunk_overlap)
+        tc, rd, ac = process_content_list_docs(str(json_file), chunk_size, chunk_overlap)
         all_text_chunks.extend(tc)
         all_raw_data.extend(rd)
+        all_contents_data.extend(ac)
 
-    print(f"🔎 总计处理 {len(all_text_chunks)} 文本 chunks，{len(all_raw_data)} RawData 条目")
-    return all_text_chunks, all_raw_data
+    print(f"🔎 总计处理 {len(all_text_chunks)} 文本 chunks，{len(all_raw_data)} RawData 条目, 总计{len(all_contents_data)}")
+    return all_text_chunks, all_raw_data, all_contents_data
 
 
 def create_milvus_collection(collection_name: str):
@@ -183,7 +195,7 @@ def store_in_milvus(chunks: list):
 if __name__ == '__main__':
     try:
         # 1. 批量读取并处理所有 content_list.json
-        text_chunks, raw_data = process_all_content_lists(CONTENT_LIST_DIR)
+        text_chunks, raw_data, all_contents = process_all_content_lists(CONTENT_LIST_DIR)
 
         # 2. 确保输出目录存在
         out_dir = Path('./JsonDataBase')
@@ -194,12 +206,15 @@ if __name__ == '__main__':
             json.dump(text_chunks, f, ensure_ascii=False, indent=2)
         with open(out_dir / 'raw_data.json', 'w', encoding='utf-8') as f:
             json.dump(raw_data, f, ensure_ascii=False, indent=2)
+        with open(out_dir / 'all_contents.json', 'w', encoding='utf-8') as f:
+            json.dump(all_contents, f, ensure_ascii=False, indent=2)
 
         print(f"✅ 已将 {len(text_chunks)} 文本 chunks 保存到 {out_dir / 'text_chunks.json'}")
         print(f"✅ 已将 {len(raw_data)} RawData 条目 保存到 {out_dir / 'raw_data.json'}")
+        print(f"✅ 已将 {len(all_contents)} all_contents 条目 保存到 {out_dir / 'all_contents.json'}")
 
-        # 4. 将所有文本 chunks 存入 Milvus
-        store_in_milvus(text_chunks)
+        # # 4. 将所有文本 chunks 存入 Milvus
+        # store_in_milvus(text_chunks)
 
     except Exception as e:
         print(f"处理失败: {e}")
