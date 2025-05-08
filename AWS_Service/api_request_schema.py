@@ -32,6 +32,7 @@ api_request_list = {
         "contentType": "application/json",
         "accept": "*/*",
         "body": {
+            "system":"",
             "messages": "",
             "max_tokens": 512,
             "temperature": 0,
@@ -48,6 +49,7 @@ api_request_list = {
         "contentType": "application/json",
         "accept": "*/*",
         "body": {
+            "system":"",
             "messages": "",
             "max_tokens": 512,
             "temperature": 0,
