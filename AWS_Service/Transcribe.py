@@ -125,9 +125,6 @@ class TranscribeService:
         # 4. 返回累积的转录文本
         return ' '.join(self._transcript_chunks)
 
-
-import asyncio
-
 async def main():
     svc = TranscribeService(region=config['region'], language_code='zh-CN')
     await svc.start_transcription()

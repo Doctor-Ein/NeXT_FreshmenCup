@@ -55,12 +55,28 @@ def model_schema_settings():
     except Exception as e:
         return jsonify({'error': f'配置更新失败: {str(e)}'}), 500
 
+from AWS_Service.Polly import Reader
+reader: Reader
+
+@app.route('/api/read',methods=['POST','GET'])
+def read_content():
+    global reader
+    if request.method == 'POST':
+        data = request.get_json()
+        reader = Reader(data['content'])
+        reader.start()
+        return jsonify({'status':'success'}),200
+    elif request.method == 'GET':
+        reader.stop()
+        reader.join()
+        del reader
+        return jsonify({'status':'success'}),200
+
 import threading
 import queue
 import asyncio  # 新增导入
 from AWS_Service.Transcribe import TranscribeService
 from AWS_Service.config import config
-from flask import jsonify, request
 
 # 1.1 指令队列与结果存储
 command_queue = queue.Queue()
@@ -122,9 +138,6 @@ def rag_toggle():
     data = request.get_json()
     isRAGEnabled = data['rag_enabled']
     return jsonify({'status': 'success'}), 200
-
-
-
 
 from AWS_Service.BedrockWrapper import BedrockWrapper 
 from AWS_Service.image_zip import compress_base64_image
