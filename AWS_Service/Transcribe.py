@@ -1,251 +1,140 @@
+import queue
 import asyncio
-import sounddevice
-import numpy as np
-from typing import List
-
-from amazon_transcribe.client import TranscribeStreamingClient
-from amazon_transcribe.model import TranscriptEvent
+import sounddevice as sd
+from concurrent.futures import InvalidStateError 
 from AWS_Service.config import config
-
-transcribe_streaming = TranscribeStreamingClient(region=config['region'])
-
-class TranscribeService:
-    """AWS Transcribe 流式语音转文字服务，仅收集并输出转录文本"""
-
-    def __init__(self, loop: asyncio.AbstractEventLoop):
-        self.loop = loop
-        self.is_continuous = False
-        self.is_paused = False
-        self.mic_stream = None
-        self.transcribe_stream = None
-        self.transcript_queue = asyncio.Queue(maxsize=10)
-        self.continuous_task = None
-
-    async def start(self):
-        """启动转录服务"""
-        if self.is_continuous:
-            print("[Debug]: 服务已启动")
-            return
-
-        self.is_continuous = True
-        self.mic_stream = MicStream(self.loop, should_accept=lambda: not self.is_paused)
-
-        lc = config['polly']['LanguageCode']
-        if lc == 'cmn-CN':
-            lc = 'zh-CN'
-
-        self.transcribe_stream = await transcribe_streaming.start_stream_transcription(
-            language_code=lc,
-            media_sample_rate_hz=16000,
-            media_encoding="pcm",
-        )
-
-        self.continuous_task = asyncio.gather(
-            self._write_audio_chunks(),
-            self._process_transcripts()
-        )
-
-    async def stop(self):
-        """停止转录服务"""
-        if not self.is_continuous:
-            print("[Debug]: 服务未运行")
-            return
-
-        self.is_continuous = False
-        self.mic_stream.stop()
-
-        try:
-            if self.transcribe_stream:
-                await self.transcribe_stream.input_stream.end_stream()
-        except Exception as e:
-            print(f"[Error]: 关闭输入流失败: {e}")
-
-        if self.continuous_task:
-            try:
-                await self.continuous_task
-            except Exception as e:
-                print(f"[Error]: 停止时出错: {e}")
-            finally:
-                self.continuous_task = None
-                self.transcribe_stream = None
-
-    def generate_keepalive_noise(duration_ms: int = 20, sample_rate: int = 16000, amplitude: int = 500) -> bytes:
-        num_samples = int(sample_rate * duration_ms / 1000)
-        # 生成 [-amplitude, +amplitude] 范围内的随机整数
-        noise = np.random.randint(-amplitude, amplitude, size=num_samples, dtype=np.int16)
-        return noise.tobytes()
-
-    async def _write_audio_chunks(self):
-        while self.is_continuous:
-            try:
-                if self.is_paused:
-                    # 发送低音量噪声
-                    silence_data = TranscribeService.generate_keepalive_noise(self.mic_stream.block_size)
-                    await self.transcribe_stream.input_stream.send_audio_event(audio_chunk=silence_data)
-                    await asyncio.sleep(0.05)  # 每 50ms 发送一次低音量数据
-                else:
-                    async for chunk, _ in self.mic_stream.stream():
-                        if not self.is_continuous or self.is_paused:
-                            break
-                        await self.transcribe_stream.input_stream.send_audio_event(audio_chunk=chunk)
-            except Exception as e:
-                print(f"[Error]: 发送音频数据时出错: {e}")
-                await asyncio.sleep(1)  # 出错时等待 1 秒后重试
-        
-        # 不要在这里 end_stream，而是在 stop() 中做
-        # await self.transcribe_stream.input_stream.end_stream()
+from amazon_transcribe.client import TranscribeStreamingClient
+from amazon_transcribe.handlers import TranscriptResultStreamHandler
+from amazon_transcribe.model import TranscriptEvent
 
 
-    async def _process_transcripts(self):
-        """接收并处理转录事件"""
-        async for event in self.transcribe_stream.output_stream:
-            if isinstance(event, TranscriptEvent):
-                if self.is_paused:
-                    continue
-                results = event.transcript.results
-                for result in results:
-                    if not result.is_partial:
-                        for alt in result.alternatives:
-                            if alt.transcript:
-                                await self.transcript_queue.put(alt.transcript)
+class MicrophoneStream:
+    """实时将麦克风数据放入队列"""
+    def __init__(self, rate=16000, chunk_size=1024):
+        self.rate = rate
+        self.chunk_size = chunk_size
+        self._buff = queue.Queue()
+        self._stream = None
 
-    def pause(self):
-        self.is_paused = True
-        print("[Debug]: 转录已暂停")
+    def _callback(self, indata, frames, time, status):
+        if status:
+            print(f"录音状态警告：{status}")
+        # 将原始 PCM 字节放入队列
+        self._buff.put(bytes(indata))
 
-    def resume(self):
-        self.is_paused = False
-        print("[Debug]: 转录已恢复")
-
-    async def get_transcript(self):
-        """获取转录文本（从队列中）"""
-        if not self.transcript_queue.empty():
-            return await self.transcript_queue.get()
-        return None
-    
-    ## 单次转录模式
-    async def one_time_transcription(self, timeout: float = None) -> List[str]:
-        """
-        单次转录模式：启动后持续转录，直到调用停止时返回所有转录结果
-        :param timeout: 可选超时时间(秒)，None表示无超时
-        :return: 所有非部分转录结果的列表
-        """
-        self._reset_transcription_state()
-        await self.start()
-        
-        try:
-            if timeout is not None:
-                await asyncio.wait_for(self._wait_for_stop(), timeout)
-            else:
-                await self._wait_for_stop()
-        except asyncio.TimeoutError:
-            print(f"[Info] 转录已达到超时时间 {timeout}秒")
-        finally:
-            await self.stop()
-            
-        return self._get_all_transcripts()
-
-    def _reset_transcription_state(self):
-        """重置转录状态"""
-        self.one_time_results = []
-        self.one_time_stop_event = asyncio.Event()
-
-    async def _wait_for_stop(self):
-        """等待停止信号"""
-        await self.one_time_stop_event.wait()
-
-    def stop_one_time(self):
-        """停止单次转录模式"""
-        self.one_time_stop_event.set()
-
-    async def _process_transcripts(self):
-        """修改后的处理转录事件方法"""
-        async for event in self.transcribe_stream.output_stream:
-            if isinstance(event, TranscriptEvent):
-                if self.is_paused:
-                    continue
-                results = event.transcript.results
-                for result in results:
-                    if not result.is_partial:
-                        for alt in result.alternatives:
-                            if alt.transcript:
-                                # 同时支持队列模式和单次模式
-                                await self.transcript_queue.put(alt.transcript)
-                                if hasattr(self, 'one_time_results'):
-                                    self.one_time_results.append(alt.transcript)
-
-    def _get_all_transcripts(self) -> List[str]:
-        """获取所有累积的转录结果"""
-        if hasattr(self, 'one_time_results'):
-            return self.one_time_results.copy()
-        return []
-
-    async def one_time_transcription(self):
-        """单次转录流程"""
-        self._reset_state()
-        await self._start_stream()
-        
-        try:
-            async for chunk in self._mic_stream():
-                if not self._running:  # 检查运行状态
-                    break
-                await self._send_audio(chunk)
-                
-            return await self._get_final_results()
-        finally:
-            await self._cleanup()
-
-    async def stop(self):
-        """立即停止服务"""
-        self._running = False
-        if self.mic_stream:
-            self.mic_stream.stop()
-        if self.transcribe_stream:
-            await self.transcribe_stream.input_stream.end_stream()
-
-class MicStream:
-    """麦克风输入音频流"""
-
-    def __init__(self, loop, should_accept=lambda: True):
-        self.loop = loop
-        self.block_size = 512
-        self.samplerate = 16000
-        self.is_running = True
-        self.should_accept = should_accept
-
-    async def stream(self):
-        """异步生成音频块"""
-        input_queue = asyncio.Queue(maxsize=2)
-
-        import numpy as np
-
-        def callback(indata, frame_count, time_info, status):
-            def enqueue():
-                try:
-                    while not input_queue.empty():
-                        input_queue.get_nowait()
-
-                    input_queue.put_nowait((bytes(indata), status))
-
-                except asyncio.QueueFull:
-                    print("[Warning]: Queue is full even after clearing.")
-
-            self.loop.call_soon_threadsafe(enqueue)
-
-        with sounddevice.RawInputStream(
+    def start(self):
+        self._stream = sd.InputStream(
+            samplerate=self.rate,
+            blocksize=self.chunk_size,
             channels=1,
-            samplerate=self.samplerate,
-            callback=callback,
-            blocksize=self.block_size,
-            dtype="int16",
-            latency="low"
-        ):
-            while self.is_running:
-                try:
-                    indata, status = await input_queue.get()
-                    yield indata, status
-                except Exception as e:
-                    print(f"[Error]: 音频流出错: {e}")
+            dtype='int16',
+            callback=self._callback
+        )
+        self._stream.start()
 
     def stop(self):
-        self.is_running = False
+        if self._stream:
+            self._stream.stop()
+            self._stream.close()
+        # 向队列发送终止信号
+        self._buff.put(None)
+
+    def generator(self):
+        """生成器：不断读取队列中的音频块，直至 None"""
+        while True:
+            chunk = self._buff.get()
+            if chunk is None:
+                return
+            yield chunk
+
+class TranscribeService:
+    """
+    基于 Amazon Transcribe Streaming SDK 的单次会话转录服务。
+    """
+    def __init__(self, region: str = 'us-east-1', language_code: str = 'en-US'):
+        self.client = TranscribeStreamingClient(region=region)
+        self.language_code = language_code
+        self.audio_stream = MicrophoneStream()
+        self._transcript_chunks = []
+
+    async def _send_audio(self, stream):
+        """并行任务：将麦克风数据发送到 Transcribe 输入流"""
+        for chunk in self.audio_stream.generator():
+            await stream.input_stream.send_audio_event(audio_chunk=chunk)
+        # 结束流
+        await stream.input_stream.end_stream()
+
+    async def _receive_transcript(self, stream):
+        handler = TranscriptResultStreamHandler(stream.output_stream)
+
+        # 自定义回调：逐条处理完整（非部分）结果
+        async def _custom_handler(event: TranscriptEvent):
+            try:
+                for result in event.transcript.results:
+                    if not result.is_partial:
+                        self._transcript_chunks.append(result.alternatives[0].transcript)
+            except InvalidStateError:
+                # Safe to ignore if the SDK tried to set a result on a cancelled Future
+                pass
+
+        handler.handle_transcript_event = _custom_handler
+
+        try:
+            await handler.handle_events()
+        except InvalidStateError:
+            # 忽略 SDK 内部回调的状态冲突错误
+            pass
+        except asyncio.CancelledError:
+            # 忽略流结束时被取消的任务
+            pass
+
+
+    async def start_transcription(self):
+        """
+        启动流式转录会话并麦克风采集。
+        返回一个 Task，用于后续停止时等待。
+        """
+        # 开启麦克风录制
+        self.audio_stream.start()
+        # 建立流式转录会话
+        stream = await self.client.start_stream_transcription(
+            language_code=self.language_code,
+            media_sample_rate_hz=self.audio_stream.rate,
+            media_encoding='pcm'
+        )
+        # 并行发送与接收
+        self._send_task = asyncio.create_task(self._send_audio(stream))
+        self._receive_task = asyncio.create_task(self._receive_transcript(stream))
+
+    async def stop_transcription(self) -> str:
+        # 1. 停止麦克风录制，触发发送任务结束
+        self.audio_stream.stop()
+
+        # 2. 等待发送任务结束，但忽略 CancelledError
+        try:
+            await self._send_task
+        except asyncio.CancelledError:
+            pass  # 这里屏蔽取消异常
+
+        # 3. 等待接收任务结束，并同样屏蔽取消异常
+        try:
+            await self._receive_task
+        except asyncio.CancelledError:
+            pass
+
+        # 4. 返回累积的转录文本
+        return ' '.join(self._transcript_chunks)
+
+
+import asyncio
+
+async def main():
+    svc = TranscribeService(region=config['region'], language_code='zh-CN')
+    await svc.start_transcription()
+    input("请说话，按回车键停止实时转录…")
+    text = await svc.stop_transcription()
+    print("===== 转录结果 =====")
+    print(text)
+
+if __name__ == '__main__':
+    asyncio.run(main())

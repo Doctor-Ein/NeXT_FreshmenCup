@@ -55,6 +55,64 @@ def model_schema_settings():
     except Exception as e:
         return jsonify({'error': f'配置更新失败: {str(e)}'}), 500
 
+import threading
+import queue
+import asyncio  # 新增导入
+from AWS_Service.Transcribe import TranscribeService
+from AWS_Service.config import config
+from flask import jsonify, request
+
+# 1.1 指令队列与结果存储
+command_queue = queue.Queue()
+result_queue = queue.Queue()
+
+# 1.2 后台线程包装函数（修复异步运行问题）
+def transcribe_worker_wrapper():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(transcribe_worker())
+
+async def transcribe_worker():
+    svc = None  # 每次会话独立实例
+    while True:
+        cmd = command_queue.get()
+        if cmd == 'start':
+            # 终止之前的服务（如果有）
+            if svc is not None:
+                await svc.stop_transcription()
+            svc = TranscribeService(region=config['region'], language_code='zh-CN')
+            await svc.start_transcription()
+        elif cmd == 'stop':
+            if svc is not None:
+                text = await svc.stop_transcription()
+                result_queue.put(text)
+                svc = None  # 清理实例
+        elif cmd == 'exit':
+            if svc is not None:
+                await svc.stop_transcription()
+            break
+        command_queue.task_done()
+
+# 1.3 启动后台线程（使用包装函数）
+worker_thread = threading.Thread(target=transcribe_worker_wrapper, daemon=True)
+worker_thread.start()
+
+@app.route('/api/transcribe', methods=['POST', 'GET'])
+def toggle_transcribe():
+    # 最小会话隔离（示例，需完善）
+    if request.method == 'POST':
+        command_queue.put('start')
+        return jsonify({'status': 'started', 'tip': 'Call GET to get result'}), 200
+
+    elif request.method == 'GET':
+        command_queue.put('stop')
+        try:
+            # 添加超时避免永久阻塞
+            text = result_queue.get(timeout=30)
+        except queue.Empty:
+            return jsonify({'error': 'Timeout waiting for transcription'}), 504
+        return jsonify({'text': text}), 200
+
 isRAGEnabled = False # aaa随手弄的全局变量哭了
 # from RAG_Package.QueryEngine import query_engine
 
@@ -65,103 +123,12 @@ def rag_toggle():
     isRAGEnabled = data['rag_enabled']
     return jsonify({'status': 'success'}), 200
 
+
+
+
 from AWS_Service.BedrockWrapper import BedrockWrapper 
-from AWS_Service.AsyncReader import AsyncReader
 from AWS_Service.image_zip import compress_base64_image
-
 bedrock = BedrockWrapper()
-reader = AsyncReader()
-
-@app.route('/api/read', methods=['POST','GET'])
-def read_content():
-    global reader
-    if request.method =='POST':
-        data = request.get_json()
-        reader.submit(data['content']) # 只需要提交即可不要关闭资源
-        return jsonify({'status':'success'}),200 # 使用异步，提早返回状态码
-    elif request.method=='GET':
-        return jsonify({'status':'success'}),200
-    
-
-import asyncio
-from threading import Thread,Lock,Event
-from AWS_Service.Transcribe import TranscribeService
-
-# 线程安全的状态管理
-transcription_lock = Lock()
-transcription_worker = None
-
-class TranscriptionWorker:
-    def __init__(self):
-        self.loop = asyncio.new_event_loop()
-        self.service = None
-        self.results = []
-        self._running = False
-        self._thread = None
-
-    def start(self):
-        """启动转录线程"""
-        self._running = True
-        self._thread = Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def _run(self):
-        """线程执行函数"""
-        asyncio.set_event_loop(self.loop)
-        self.service = TranscribeService(self.loop)
-        
-        async def task():
-            try:
-                self.results = await self.service.one_time_transcription()
-            except Exception as e:
-                self.results = [f"Error: {str(e)}"]
-            finally:
-                await self.service.stop()
-                self._running = False
-        
-        self.loop.run_until_complete(task())
-
-    def stop(self):
-        """停止转录"""
-        if self.service and self._running:
-            self.loop.call_soon_threadsafe(lambda: self.loop.create_task(self.service.stop()))
-        self._running = False
-
-    def is_running(self):
-        return self._thread.is_alive() if self._thread else False
-
-@app.route('/toggle_transcription', methods=['POST'])
-def toggle_transcription():
-    global transcription_worker
-
-    with transcription_lock:
-        if not transcription_worker or not transcription_worker.is_running():
-            # 第一次点击 - 启动转录
-            transcription_worker = TranscriptionWorker()
-            transcription_worker.start()
-            
-            return jsonify({
-                'status': 'started',
-                'message': '正在聆听中...请开始说话',
-                'results': []
-            })
-        
-        else:
-            # 第二次点击 - 停止转录
-            transcription_worker.stop()
-            
-            # 等待最多3秒获取结果
-            transcription_worker._thread.join(timeout=3)
-            results = transcription_worker.results
-            
-            # 重置工作线程
-            transcription_worker = None
-            
-            return jsonify({
-                'status': 'completed',
-                'message': '转录完成' if results else '停止超时',
-                'results': results
-            })
 
 @app.route('/api/submit', methods=['POST'])
 def handleSubmit():
