@@ -27,7 +27,7 @@ config = {
     },
     'network': {
         'connect_timeout': 5,  # 连接超时时间（秒）
-        'read_timeout': 10,    # 读取超时时间（秒）
+        'read_timeout': 30,    # 读取超时时间（秒）
         'max_retries': 3,      # 最大重试次数
         'retry_delay': 2       # 重试延迟时间（秒）
     },

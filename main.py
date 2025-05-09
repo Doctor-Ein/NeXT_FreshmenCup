@@ -1,8 +1,37 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, abort
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)  # 允许跨域访问
+
+from dialogue_database import DialogueManager
+
+manager = DialogueManager('./test_db.json')
+
+# 1. 创建新对话
+@app.route('/api/create_dialogue', methods=['POST'])
+def create_dialogue():
+    data = request.get_json()
+    title = data.get('title', '')
+    timestamp = manager.create_dialogue(title)
+    return jsonify({'id': timestamp}),201 
+
+
+# 2. 获取所有对话列表
+@app.route('/api/dialogue_list', methods=['GET'])
+def dialogue_list():
+    dialogues = manager.get_all_dialogues()
+    dialogues.reverse() # 按照从最近到过往的顺序返回
+    return jsonify(dialogues)
+
+# 3. 获取会话内的所有轮次的消息
+@app.route('/api/get_messages/<dialogue_id>', methods=['GET'])
+def update_messages(dialogue_id):
+    if manager.select_dialogue(dialogue_id):
+        turns = manager.get_current_turns()
+        return jsonify(turns),200
+    else:
+        abort(500, description="dialogue doesn't exist")
 
 @app.route('/api/settings', methods=['POST'])
 def model_schema_settings():
@@ -27,6 +56,24 @@ def model_schema_settings():
     except Exception as e:
         return jsonify({'error': f'配置更新失败: {str(e)}'}), 500
 
+from AWS_Service.BedrockWrapper import BedrockWrapper 
+from image_zip import compress_base64_image
+
+@app.route('/api/submit', methods=['POST'])
+def handleSubmit():
+    try:
+        data = request.get_json()
+    except Exception as e:
+        print('Error',e)
+    manager.add_turn(speaker='user',content=data['text'], images=data['images']) # 这里有个概念命名未对齐的问题🤔content在数据库中仅为text的含义
+    images = [compress_base64_image(item['data'],item['media_type']) for item in data['images']]
+    if None in images:
+        images = []
+    bedrock = BedrockWrapper()
+    input_text = data['text']
+    response = bedrock.invoke_model(input_text,dialogue_list=[],images=images)
+    manager.add_turn(speaker='assistant',content=response,images=[])
+    return jsonify({'res':response}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
