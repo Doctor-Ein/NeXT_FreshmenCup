@@ -25,8 +25,10 @@ def load_blocks_from_jsondb(json_path: str) -> list:
     data = json.loads(path.read_text(encoding="utf-8"))
     return data
 
+blocks = load_blocks_from_jsondb(RAW_DATA_JSON)
+
 class QueryEngine:
-    def __init__(self, milvus_client, embedder, collection, blocks, reranker=None):
+    def __init__(self, milvus_client=client, embedder=embedder, collection=COLLECTION_NAME, blocks=blocks, reranker=None):
         self.client     = milvus_client
         self.embedder   = embedder
         self.collection = collection

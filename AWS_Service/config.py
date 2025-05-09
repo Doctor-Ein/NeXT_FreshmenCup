@@ -23,6 +23,7 @@ config = {
     'log_level': 'info',  # One of: info, debug, none
     'region': aws_region,
     'bedrock': {
+        'model_id':model_id,
         'api_request': api_request
     },
     'network': {
