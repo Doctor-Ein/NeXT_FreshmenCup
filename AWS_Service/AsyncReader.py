@@ -66,8 +66,8 @@ class AsyncReader:
                     break
                 with self.lock:
                     self.reading = True
+                    # 启动异步任务进行朗读
                     self.current_task = self.executor.submit(self.reader.read, sentence)
-                    self.current_task.result()  # 阻塞直到朗读结束
                     self.reading = False
                 self.queue.task_done()
             except queue.Empty:
@@ -80,20 +80,29 @@ class AsyncReader:
         with self.lock:
             return self.reading
 
-    def interrupt(self):
+    def interrupt_and_clear(self):
         with self.lock:
             if self.reading:
+                # 中断当前朗读任务
                 self.reader.stop()
                 if self.current_task:
+                    # 取消当前任务，防止它继续执行
                     self.current_task.cancel()
                 self.reading = False
+        # 清空队列中的剩余任务
+        with self.queue.mutex:
+            self.queue.queue.clear()
+            self.queue.all_tasks_done.notify_all()
+            self.queue.unfinished_tasks = 0
 
     def stop(self):
         self.running = False
         self.queue.put(None)
         self.thread.join()
-        self.executor.shutdown(wait=True)
-        self.reader.close()
+
+    def close(self):
+        self.reader.close()  # 专门用于释放资源的方法
+
 
 # 示例用法（请在主程序中使用）
 if __name__ == "__main__":

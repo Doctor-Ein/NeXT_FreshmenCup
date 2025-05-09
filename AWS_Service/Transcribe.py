@@ -1,6 +1,7 @@
 import asyncio
 import sounddevice
 import numpy as np
+from typing import List
 
 from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.model import TranscriptEvent
@@ -121,7 +122,86 @@ class TranscribeService:
         if not self.transcript_queue.empty():
             return await self.transcript_queue.get()
         return None
+    
+    ## 单次转录模式
+    async def one_time_transcription(self, timeout: float = None) -> List[str]:
+        """
+        单次转录模式：启动后持续转录，直到调用停止时返回所有转录结果
+        :param timeout: 可选超时时间(秒)，None表示无超时
+        :return: 所有非部分转录结果的列表
+        """
+        self._reset_transcription_state()
+        await self.start()
+        
+        try:
+            if timeout is not None:
+                await asyncio.wait_for(self._wait_for_stop(), timeout)
+            else:
+                await self._wait_for_stop()
+        except asyncio.TimeoutError:
+            print(f"[Info] 转录已达到超时时间 {timeout}秒")
+        finally:
+            await self.stop()
+            
+        return self._get_all_transcripts()
 
+    def _reset_transcription_state(self):
+        """重置转录状态"""
+        self.one_time_results = []
+        self.one_time_stop_event = asyncio.Event()
+
+    async def _wait_for_stop(self):
+        """等待停止信号"""
+        await self.one_time_stop_event.wait()
+
+    def stop_one_time(self):
+        """停止单次转录模式"""
+        self.one_time_stop_event.set()
+
+    async def _process_transcripts(self):
+        """修改后的处理转录事件方法"""
+        async for event in self.transcribe_stream.output_stream:
+            if isinstance(event, TranscriptEvent):
+                if self.is_paused:
+                    continue
+                results = event.transcript.results
+                for result in results:
+                    if not result.is_partial:
+                        for alt in result.alternatives:
+                            if alt.transcript:
+                                # 同时支持队列模式和单次模式
+                                await self.transcript_queue.put(alt.transcript)
+                                if hasattr(self, 'one_time_results'):
+                                    self.one_time_results.append(alt.transcript)
+
+    def _get_all_transcripts(self) -> List[str]:
+        """获取所有累积的转录结果"""
+        if hasattr(self, 'one_time_results'):
+            return self.one_time_results.copy()
+        return []
+
+    async def one_time_transcription(self):
+        """单次转录流程"""
+        self._reset_state()
+        await self._start_stream()
+        
+        try:
+            async for chunk in self._mic_stream():
+                if not self._running:  # 检查运行状态
+                    break
+                await self._send_audio(chunk)
+                
+            return await self._get_final_results()
+        finally:
+            await self._cleanup()
+
+    async def stop(self):
+        """立即停止服务"""
+        self._running = False
+        if self.mic_stream:
+            self.mic_stream.stop()
+        if self.transcribe_stream:
+            await self.transcribe_stream.input_stream.end_stream()
 
 class MicStream:
     """麦克风输入音频流"""
