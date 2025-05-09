@@ -40,14 +40,6 @@ class Reader:
 
 # 使用示例代码
 if __name__ == "__main__":
-    # 初始化读取器
     reader = Reader()
-
-    # 要读取的文本
-    text_to_read = "渡月橋の上で、ずっと君を思い出していた。"
-
-    # 读取文本
-    reader.read(text_to_read)
-
-    # 关闭读取器
+    reader.read("你好，我是来自亚马逊 Polly 的语音。")
     reader.close()

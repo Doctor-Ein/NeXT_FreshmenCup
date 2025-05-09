@@ -28,7 +28,7 @@ def load_blocks_from_jsondb(json_path: str) -> list:
 blocks = load_blocks_from_jsondb(RAW_DATA_JSON)
 
 class QueryEngine:
-    def __init__(self, milvus_client=client, embedder=embedder, collection=COLLECTION_NAME, blocks=blocks, reranker=None):
+    def __init__(self, milvus_client, embedder, collection, blocks, reranker=None):
         self.client     = milvus_client
         self.embedder   = embedder
         self.collection = collection
@@ -122,37 +122,35 @@ class QueryEngine:
 
         return results
 
-if __name__ == "__main__":
-    print("📦 向量库总量：", client.get_collection_stats(collection_name=COLLECTION_NAME))
-    blocks = load_blocks_from_jsondb(RAW_DATA_JSON)
+print("📦 向量库总量：", client.get_collection_stats(collection_name=COLLECTION_NAME))
+blocks = load_blocks_from_jsondb(RAW_DATA_JSON)
 
-    # 加载重排器（如果有）
-    try:
-        from RAG_Package.reranker import MilvusReranker
-        reranker = MilvusReranker(model_name="./local_models/bge-reranker-large")
-    except ImportError:
-        reranker = None
-        print("[WARNING] 未加载重排器，将禁用重排")
+# 加载重排器（如果有）
+try:
+    from RAG_Package.reranker import MilvusReranker
+    reranker = MilvusReranker(model_name="./local_models/bge-reranker-large")
+except ImportError:
+    reranker = None
+    print("[WARNING] 未加载重排器，将禁用重排")
 
-    engine = QueryEngine(
-        milvus_client=client,
-        embedder=embedder,
-        collection=COLLECTION_NAME,
-        blocks=blocks,
-        reranker=reranker
-    )
+query_engine = QueryEngine(
+    milvus_client=client,
+    embedder=embedder,
+    collection=COLLECTION_NAME,
+    blocks=blocks,
+    reranker=reranker
+)
 
-    query_str = input("Enter your query: ")
-    print(f'[INFO] query_str: {query_str}')
-    out = engine.query(query_str, top_k=10, use_rerank=True, rerank_top_k=3)
 
-    for item in out:
-        print(item['main'], end='\n\n')
-        for adj in item["adjacent"]:
-            type = adj.get("type", "unknown")
-            block_id = adj.get("block_id", "?")
-            print(f"  ↳ Adjacent ({type}), Block={block_id}:")
-            if type == "text":
-                print("    Text:", adj.get("text", "[No Text]"))
-            else:
-                print("    Content:", adj.get("content", "[No Content]"))
+# out = engine.query(query_str, top_k=10, use_rerank=True, rerank_top_k=3)
+
+# for item in out:
+#     print(item['main'], end='\n\n')
+#     for adj in item["adjacent"]:
+#         type = adj.get("type", "unknown")
+#         block_id = adj.get("block_id", "?")
+#         print(f"  ↳ Adjacent ({type}), Block={block_id}:")
+#         if type == "text":
+#             print("    Text:", adj.get("text", "[No Text]"))
+#         else:
+#             print("    Content:", adj.get("content", "[No Content]"))
