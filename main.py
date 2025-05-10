@@ -197,7 +197,7 @@ def handleSubmit():
 
         else:
             request_text += "以下是RAG参考资料：\n"
-            out = query_engine.query(input_text, top_k=10,use_rerank=True,rerank_top_k=3)
+            out = query_engine.query(input_text, top_k=10,use_rerank=False,rerank_top_k=3)
             for item in out:
                 obj = {
                         'text': item.get('text', ''),
@@ -206,8 +206,8 @@ def handleSubmit():
                     }
                 request_text += json.dumps(obj, ensure_ascii=False) + '\n'
 
-        with open('debug.txt','a',encoding='utf-8') as f:
-            print(request,file=f,end='\n====================\n')
+        with open('./debug.txt','a',encoding='utf-8') as f:
+            print(request_text,file=f,end='\n====================\n')
 
     # 这个是记忆部分😂
     cur_turns = []

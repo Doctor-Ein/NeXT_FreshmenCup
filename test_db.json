@@ -10,6 +10,26 @@
       "title": "\u65b0\u5bf9\u8bdd",
       "created_at": "2025-05-10T11:37:02.329131",
       "updated_at": "2025-05-10T11:38:40.840031"
+    },
+    "20250510114445_2f653b21": {
+      "title": "\u65b0\u5bf9\u8bdd",
+      "created_at": "2025-05-10T11:44:45.022011",
+      "updated_at": "2025-05-10T11:44:56.650746"
+    },
+    "20250510114855_d03bcac6": {
+      "title": "\u6ce8\u610f\u529b\u673a\u5236\u7ae0\u8282\u5185\u5bb9\u8be2\u95ee",
+      "created_at": "2025-05-10T11:48:55.689372",
+      "updated_at": "2025-05-10T11:49:09.196599"
+    },
+    "20250510115116_060041c2": {
+      "title": "\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u6ce8\u610f\u529b\u673a\u5236\u6982\u8ff0",
+      "created_at": "2025-05-10T11:51:16.142938",
+      "updated_at": "2025-05-10T11:57:34.680752"
+    },
+    "20250510120257_6e190ef3": {
+      "title": "\u6ce8\u610f\u529b\u673a\u5236\u7ae0\u8282\u5185\u5bb9\u8be2\u95ee",
+      "created_at": "2025-05-10T12:02:57.016305",
+      "updated_at": "2025-05-10T12:03:08.122830"
     }
   },
   "turns": {
@@ -41,16 +61,84 @@
       "content": "\u4f60\u77e5\u9053\u5728\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u8fd9\u672c\u4e66\u7684 \u6ce8\u610f\u529b\u673a\u5236 \u8fd9\u4e00\u7ae0\u4e2d\uff0c\u4f5c\u8005\u4ecb\u7ecd\u4e86\u54ea\u4e9b\u6ce8\u610f\u529b\u673a\u5236\u5417\uff1f\u56de\u7b54\u4e0d\u8d85\u8fc760\u4e2a\n\u5b57\uff0c",
       "images": [],
       "timestamp": "2025-05-10T11:38:40.840022"
+    },
+    "20250510114456_fad38fc0": {
+      "dialogue_id": "20250510114445_2f653b21",
+      "speaker": "user",
+      "content": "\u4f60\u77e5\u9053\u5728\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u8fd9\u672c\u4e66\u7684 \u6ce8\u610f\u529b\u673a\u5236 \u8fd9\u4e00\u7ae0\u4e2d\uff0c\u4f5c\u8005\u4ecb\u7ecd\u4e86\u54ea\u4e9b\u6ce8\u610f\u529b\u673a\u5236\u5417\uff1f\u56de\u7b54\u4e0d\u8d85\u8fc760\u4e2a\n\u5b57\uff0c",
+      "images": [],
+      "timestamp": "2025-05-10T11:44:56.650735"
+    },
+    "20250510114904_df6b4392": {
+      "dialogue_id": "20250510114855_d03bcac6",
+      "speaker": "user",
+      "content": "\u4f60\u77e5\u9053\u5728\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u8fd9\u672c\u4e66\u7684 \u6ce8\u610f\u529b\u673a\u5236 \u8fd9\u4e00\u7ae0\u4e2d\uff0c\u4f5c\u8005\u4ecb\u7ecd\u4e86\u54ea\u4e9b\u6ce8\u610f\u529b\u673a\u5236\u5417\uff1f\u56de\u7b54\u4e0d\u8d85\u8fc760\u4e2a\n\u5b57\uff0c",
+      "images": [],
+      "timestamp": "2025-05-10T11:49:04.348410"
+    },
+    "20250510114908_3885d7c8": {
+      "dialogue_id": "20250510114855_d03bcac6",
+      "speaker": "assistant",
+      "content": "\u6839\u636e\u63d0\u4f9b\u7684\u4fe1\u606f\uff0c\u6211\u65e0\u6cd5\u786e\u5b9a\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u8fd9\u672c\u4e66\u4e2d\u5177\u4f53\u4ecb\u7ecd\u4e86\u54ea\u4e9b\u6ce8\u610f\u529b\u673a\u5236\u3002\u6ca1\u6709\u76f8\u5173\u7684\u53c2\u8003\u8d44\u6599\u6216\u4e0a\u4e0b\u6587\uff0c\u6211\u65e0\u6cd5\u51c6\u786e\u56de\u7b54\u8fd9\u4e2a\u95ee\u9898\u3002\u5982\u679c\u60a8\u6709\u8be5\u4e66\u7684\u5177\u4f53\u7ae0\u8282\u5185\u5bb9\u6216\u76f8\u5173\u8d44\u6599\uff0c\u6211\u53ef\u4ee5\u57fa\u4e8e\u90a3\u4e9b\u4fe1\u606f\u4e3a\u60a8\u63d0\u4f9b\u66f4\u51c6\u786e\u7684\u56de\u7b54\u3002",
+      "images": [],
+      "timestamp": "2025-05-10T11:49:08.131718"
+    },
+    "20250510115131_e18c976f": {
+      "dialogue_id": "20250510115116_060041c2",
+      "speaker": "user",
+      "content": "\u4f60\u77e5\u9053\u5728\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u8fd9\u672c\u4e66\u7684 \u6ce8\u610f\u529b\u673a\u5236 \u8fd9\u4e00\u7ae0\u4e2d\uff0c\u4f5c\u8005\u4ecb\u7ecd\u4e86\u54ea\u4e9b\u6ce8\u610f\u529b\u673a\u5236\u5417\uff1f\u56de\u7b54\u4e0d\u8d85\u8fc760\u4e2a\n\u5b57\uff0c",
+      "images": [],
+      "timestamp": "2025-05-10T11:51:31.276819"
+    },
+    "20250510115146_1af9294b": {
+      "dialogue_id": "20250510115116_060041c2",
+      "speaker": "assistant",
+      "content": "\u6839\u636e\u63d0\u4f9b\u7684\u53c2\u8003\u8d44\u6599\uff0c\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u8fd9\u672c\u4e66\u5728\u6ce8\u610f\u529b\u673a\u5236\u7ae0\u8282\u4e2d\u4ecb\u7ecd\u4e86\u4ee5\u4e0b\u5185\u5bb9\uff1a\n\n\u4ece\u6700\u57fa\u672c\u7684\u76f4\u89c9\u548c\u6700\u7b80\u5355\u7684\u5b9e\u73b0\u5f00\u59cb\uff0c\u9010\u6b65\u8bb2\u89e3\u5230Transformer\u67b6\u6784\u3001\u89c6\u89c9Transformer\u548c\u73b0\u4ee3\u57fa\u4e8eTransformer\u7684\u9884\u8bad\u7ec3\u6a21\u578b\u3002\u4e66\u4e2d\u8fd8\u4ecb\u7ecd\u4e86\u6ce8\u610f\u529b\u673a\u5236\u7684\u57fa\u672c\u6982\u5ff5\u548c\u6570\u5b66\u8868\u793a\u3002",
+      "images": [],
+      "timestamp": "2025-05-10T11:51:46.764119"
+    },
+    "20250510115717_a1c96d37": {
+      "dialogue_id": "20250510115116_060041c2",
+      "speaker": "user",
+      "content": "\u4f60\u77e5\u9053\u5728\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\uff08\u5143\u6570\u636efile_name\u4e3a\u5206\u533a\u7684\u5c31\u662f\uff09\u8fd9\u672c\u4e66\u7684 \u6ce8\u610f\u529b\u673a\u5236 \u8fd9\u4e00\u7ae0\u4e2d\uff0c\u4f5c\u8005\u4ecb\u7ecd\u4e86\u54ea\u4e9b\u6ce8\u610f\u529b\u673a\u5236\u5417\uff1f\u56de\u7b54\u4e0d\u8d85\u8fc760\u4e2a\n\u5b57\uff0c",
+      "images": [],
+      "timestamp": "2025-05-10T11:57:17.625048"
+    },
+    "20250510115734_b7e76488": {
+      "dialogue_id": "20250510115116_060041c2",
+      "speaker": "assistant",
+      "content": "\u5f88\u62b1\u6b49\uff0c\u6839\u636e\u63d0\u4f9b\u7684RAG\u53c2\u8003\u8d44\u6599\uff0c\u6211\u65e0\u6cd5\u786e\u5b9a\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u8fd9\u672c\u4e66\u5728\u6ce8\u610f\u529b\u673a\u5236\u7ae0\u8282\u4e2d\u5177\u4f53\u4ecb\u7ecd\u4e86\u54ea\u4e9b\u6ce8\u610f\u529b\u673a\u5236\u3002\u63d0\u4f9b\u7684\u8d44\u6599\u4e2d\u6ca1\u6709\u76f4\u63a5\u76f8\u5173\u7684\u4fe1\u606f\u6765\u56de\u7b54\u8fd9\u4e2a\u95ee\u9898\u3002\u5982\u679c\u60a8\u6709\u66f4\u591a\u76f8\u5173\u7684\u53c2\u8003\u8d44\u6599\uff0c\u6211\u5c06\u5f88\u4e50\u610f\u5e2e\u60a8\u5206\u6790\u3002",
+      "images": [],
+      "timestamp": "2025-05-10T11:57:34.680743"
+    },
+    "20250510120303_550240c3": {
+      "dialogue_id": "20250510120257_6e190ef3",
+      "speaker": "user",
+      "content": "\u4f60\u77e5\u9053\u5728\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\uff08\u5143\u6570\u636efile_name\u4e3a\u5206\u533a\u7684\u5c31\u662f\uff09\u8fd9\u672c\u4e66\u7684 \u6ce8\u610f\u529b\u673a\u5236 \u8fd9\u4e00\u7ae0\u4e2d\uff0c\u4f5c\u8005\u4ecb\u7ecd\u4e86\u54ea\u4e9b\u6ce8\u610f\u529b\u673a\u5236\u5417\uff1f\u56de\u7b54\u4e0d\u8d85\u8fc760\u4e2a\u5b57\uff0c",
+      "images": [],
+      "timestamp": "2025-05-10T12:03:03.394014"
+    },
+    "20250510120306_3001f803": {
+      "dialogue_id": "20250510120257_6e190ef3",
+      "speaker": "assistant",
+      "content": "\u6839\u636e\u63d0\u4f9b\u7684\u4fe1\u606f\uff0c\u6211\u65e0\u6cd5\u786e\u5b9a\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u8fd9\u672c\u4e66\u4e2d\u5177\u4f53\u4ecb\u7ecd\u4e86\u54ea\u4e9b\u6ce8\u610f\u529b\u673a\u5236\u3002\u6ca1\u6709\u76f8\u5173\u7684\u53c2\u8003\u8d44\u6599\u6216\u4e0a\u4e0b\u6587\u6765\u56de\u7b54\u8fd9\u4e2a\u95ee\u9898\u3002\u5982\u679c\u60a8\u80fd\u63d0\u4f9b\u66f4\u591a\u76f8\u5173\u4fe1\u606f\u6216\u5177\u4f53\u7ae0\u8282\u5185\u5bb9\uff0c\u6211\u5c06\u80fd\u591f\u66f4\u51c6\u786e\u5730\u56de\u7b54\u60a8\u7684\u95ee\u9898\u3002",
+      "images": [],
+      "timestamp": "2025-05-10T12:03:06.828940"
     }
   },
   "indexes": {
     "dialogue_timestamps": [
       "20250510110505_41165377",
-      "20250510113702_84a0a0a0"
+      "20250510113702_84a0a0a0",
+      "20250510114445_2f653b21",
+      "20250510114855_d03bcac6",
+      "20250510115116_060041c2",
+      "20250510120257_6e190ef3"
     ],
     "dialogue_titles": {
       "Transformer\u6a21\u578b\u67b6\u6784\u5206\u6790": "20250510110505_41165377",
-      "\u65b0\u5bf9\u8bdd": "20250510113702_84a0a0a0"
+      "\u6ce8\u610f\u529b\u673a\u5236\u7ae0\u8282\u5185\u5bb9\u8be2\u95ee": "20250510120257_6e190ef3",
+      "\u300a\u52a8\u624b\u5b66\u6df1\u5ea6\u5b66\u4e60\u300b\u6ce8\u610f\u529b\u673a\u5236\u6982\u8ff0": "20250510115116_060041c2"
     },
     "dialogue_turns": {
       "20250510110505_41165377": [
@@ -59,6 +147,23 @@
       ],
       "20250510113702_84a0a0a0": [
         "20250510113840_b646eb2e"
+      ],
+      "20250510114445_2f653b21": [
+        "20250510114456_fad38fc0"
+      ],
+      "20250510114855_d03bcac6": [
+        "20250510114904_df6b4392",
+        "20250510114908_3885d7c8"
+      ],
+      "20250510115116_060041c2": [
+        "20250510115131_e18c976f",
+        "20250510115146_1af9294b",
+        "20250510115717_a1c96d37",
+        "20250510115734_b7e76488"
+      ],
+      "20250510120257_6e190ef3": [
+        "20250510120303_550240c3",
+        "20250510120306_3001f803"
       ]
     }
   }

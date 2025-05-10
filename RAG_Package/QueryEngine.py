@@ -23,6 +23,11 @@ def load_blocks_from_jsondb(json_path: str) -> list:
     if not path.exists():
         raise FileNotFoundError(f"❌ 找不到 text_chunks.json: {json_path}")
     data = json.loads(path.read_text(encoding="utf-8"))
+    # 在load_blocks_from_jsondb函数中添加
+    for blk in data:
+        meta = blk.get("metadata", {})
+        if not all(k in meta for k in ("file_name", "block_id")):
+            print(f"⚠️ 损坏的元数据块: {json.dumps(blk, indent=2)}")
     return data
 
 blocks = load_blocks_from_jsondb(JSON_PATH)
@@ -66,8 +71,12 @@ class QueryEngine:
                 
                 # 合并可能存在的元数据字段（优先使用原始块数据）
                 full_metadata = {**full_block["metadata"], **hit_metadata}
+                # 修改候选文档构建逻辑
+                # 修改候选文档构建逻辑（QueryEngine.query()方法内）
                 candidates.append({
                     "text": hit["entity"]["text"],
+                    "id": str(full_metadata["block_id"]),
+                    "partition": full_metadata["file_name"],  # 关键映射
                     "metadata": full_metadata
                 })
 
@@ -105,17 +114,17 @@ class QueryEngine:
 print("📦 向量库总量：", client.get_collection_stats(collection_name=COLLECTION_NAME))
 
 
-# 加载重排器（如果有）
-try:
-    from RAG_Package.reranker import MilvusReranker
-    reranker = MilvusReranker(model_name="./local_models/bge-reranker-large")
-except ImportError:
-    reranker = None
-    print("[WARNING] 未加载重排器，将禁用重排")
+# # 加载重排器（如果有）
+# try:
+#     from RAG_Package.reranker import MilvusReranker
+#     reranker = MilvusReranker(model_name="./local_models/bge-reranker-large")
+# except ImportError:
+#     reranker = None
+#     print("[WARNING] 未加载重排器，将禁用重排")
 
 query_engine = QueryEngine(
     milvus_client=client,
     embedder=embedder,
     collection=COLLECTION_NAME,
-    reranker=reranker  # ✅ 正确参数列表
+    reranker=None  # ✅ 正确参数列表
 )
