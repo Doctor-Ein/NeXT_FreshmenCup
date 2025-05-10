@@ -12,7 +12,7 @@ COLLECTION_NAME  = "DL_KDB"
 MODEL_PATH       = "./local_models/bge-m3"
 TOP_K            = 5
 RERANK_TOP_K     = 5
-RAW_DATA_JSON    = './JsonDataBase/raw_data.json'
+JSON_PATH    = './JsonDataBase/text_chunks.json'
 
 # 客户端与模型
 client    = MilvusClient(uri=MILVUS_URI)
@@ -21,29 +21,20 @@ embedder  = HuggingFaceEmbedding(model_name=MODEL_PATH)
 def load_blocks_from_jsondb(json_path: str) -> list:
     path = Path(json_path)
     if not path.exists():
-        raise FileNotFoundError(f"❌ 找不到 raw_data.json: {json_path}")
+        raise FileNotFoundError(f"❌ 找不到 text_chunks.json: {json_path}")
     data = json.loads(path.read_text(encoding="utf-8"))
     return data
 
-blocks = load_blocks_from_jsondb(RAW_DATA_JSON)
+blocks = load_blocks_from_jsondb(JSON_PATH)
 
 class QueryEngine:
-    def __init__(self, milvus_client, embedder, collection, blocks, reranker=None):
-        self.client     = milvus_client
-        self.embedder   = embedder
+    def __init__(self, milvus_client, embedder, collection, reranker=None):
+        self.client = milvus_client
+        self.embedder = embedder
         self.collection = collection
-        self.blocks     = blocks
-        self.reranker   = reranker
+        self.reranker = reranker
 
-        self.file_block_map = {}
-        for blk in blocks:
-            fname = blk['metadata']['file_name']
-            self.file_block_map.setdefault(fname, []).append(blk)
-
-        for fname, blist in self.file_block_map.items():
-            blist.sort(key=lambda b: int(b['metadata']['block_id']))
-            print(f"[DEBUG] 加载文件 {fname} 的块数: {len(blist)}")
-
+        # 构建基于(file_name, block_id)的索引
         self.index = {
             (blk["metadata"]["file_name"], int(blk["metadata"]["block_id"])): blk
             for blk in blocks
@@ -58,72 +49,61 @@ class QueryEngine:
             anns_field="vector",
             search_params={"metric_type": "L2", "params": {'nlist': 480}},
             limit=top_k,
-            output_fields=["text", "metadata"]
+            output_fields=["text", "metadata"]  # 确保metadata字段被请求
         )
 
         candidates = []
         for hits in res:
             for hit in hits:
-                m = hit["entity"]["metadata"]
-                fname = m["file_name"]
-                blk_id = int(m["block_id"])
-                text = hit['entity']['text']
-
-                if not text:
+                hit_metadata = hit["entity"]["metadata"]
+                fname = hit_metadata["file_name"]
+                blk_id = int(hit_metadata["block_id"])
+                
+                # 从预建索引中获取完整元数据
+                full_block = self.index.get((fname, blk_id))
+                if not full_block:
                     continue
-
+                
+                # 合并可能存在的元数据字段（优先使用原始块数据）
+                full_metadata = {**full_block["metadata"], **hit_metadata}
                 candidates.append({
-                    "text": text,
-                    "id": blk_id,
-                    "partition": fname  # 复用 partition 字段
+                    "text": hit["entity"]["text"],
+                    "metadata": full_metadata
                 })
 
-        # 若启用重排，则进行重排处理
+        # 在重排前添加保护逻辑
+        candidates = [c for c in candidates if c]  # 过滤空值
+        if not candidates:
+            return []
+
+        # 结果重排处理
         if use_rerank and self.reranker:
+            
             reranked = self.reranker(
                 query=text_query,
                 retrieved_documents=candidates,
                 top_k=rerank_top_k
             )
-            # 把文本拿出来再找邻接块
-            reranked_texts = [doc["text"] for doc in reranked]
         else:
-            reranked = [{"text": c["text"], "score": None, "metadata": {"id": c["id"], "partition": c["partition"]}} for c in candidates]
-            reranked_texts = [c["text"] for c in candidates]
+            reranked = [{
+                "text": c["text"],
+                "metadata": c["metadata"],
+                "score": None
+            } for c in candidates[:rerank_top_k]]
 
+        # 构建最终结果（包含完整元数据）
         results = []
         for doc in reranked:
-            fname = doc["metadata"]["partition"]
-            blk_id = int(doc["metadata"]["id"])
-            main = doc["text"]
-
-            print(f"\n[DEBUG] 命中块: file={fname}, block_id={blk_id}")
-
-            if fname not in self.file_block_map:
-                print(f"[WARNING] file_name '{fname}' 不在 file_block_map 中！")
-                continue
-
-            raw_blks = self.file_block_map[fname]
-            adj = []
-
-            for block in raw_blks:
-                bid = block['metadata']['block_id']
-                if bid == blk_id - 1 or bid == blk_id + 1:
-                    adj.append(block)
-
-            if not adj:
-                print(f"[DEBUG] ❌ 找不到邻接块，使用默认")
-                adj = [{"type": "text", "block_id": -1, "text": "[No Adjacent]"}]
-
             results.append({
-                "main": main,
-                "adjacent": adj
+                "text": doc["text"],
+                "metadata": doc["metadata"]
             })
 
         return results
 
+
 print("📦 向量库总量：", client.get_collection_stats(collection_name=COLLECTION_NAME))
-blocks = load_blocks_from_jsondb(RAW_DATA_JSON)
+
 
 # 加载重排器（如果有）
 try:
@@ -137,20 +117,5 @@ query_engine = QueryEngine(
     milvus_client=client,
     embedder=embedder,
     collection=COLLECTION_NAME,
-    blocks=blocks,
-    reranker=reranker
+    reranker=reranker  # ✅ 正确参数列表
 )
-
-
-# out = engine.query(query_str, top_k=10, use_rerank=True, rerank_top_k=3)
-
-# for item in out:
-#     print(item['main'], end='\n\n')
-#     for adj in item["adjacent"]:
-#         type = adj.get("type", "unknown")
-#         block_id = adj.get("block_id", "?")
-#         print(f"  ↳ Adjacent ({type}), Block={block_id}:")
-#         if type == "text":
-#             print("    Text:", adj.get("text", "[No Text]"))
-#         else:
-#             print("    Content:", adj.get("content", "[No Content]"))

@@ -32,7 +32,7 @@ api_request_list = {
         "contentType": "application/json",
         "accept": "*/*",
         "body": {
-            "system":"回答均输出markdown格式的文本。对于数学公式，行内使用$...$；独立公式使用$$...$$，并且在其前需要主动换行",
+            "system":"回答均输出markdown格式的文本。对于数学公式，行内使用$...$；独立公式使用$$...$$，并且在其前需要主动换行。RAG模式下，参考资料以json字符串格式给出，注意辨别无关主题，通过元数据给出正确的来源引用",
             "messages": "",
             "max_tokens": 1024,
             "temperature": 0.5,

@@ -141,10 +141,13 @@ def toggle_transcribe():
         return jsonify({'text': text}), 200
 
 isRAGEnabled = False # aaa随手弄的全局变量哭了
-# from RAG_Package.QueryEngine import query_engine
+from RAG_Package.QueryEngine import query_engine
 
 @app.route('/api/rag_toggle', methods=['POST','OPTIONS'])
 def rag_toggle():
+    if request.method == 'OPTIONS':
+        # 返回一个空的响应，状态码为 200
+        return '', 200
     global isRAGEnabled
     data = request.get_json()
     isRAGEnabled = data['rag_enabled']
@@ -153,6 +156,8 @@ def rag_toggle():
 from AWS_Service.BedrockWrapper import BedrockWrapper 
 from tools.image_zip import compress_base64_image
 bedrock = BedrockWrapper()
+
+import json
 
 @app.route('/api/submit', methods=['POST'])
 def handleSubmit():
@@ -165,20 +170,57 @@ def handleSubmit():
         images = []
 
     input_text = data['text']
+    request_text = 'RAG模式：\n' + input_text + '\n'
+    ## 这里执行RAG的处理流程
+    if isRAGEnabled:
+        if images: # 如果有图片则降低一点文本ref的权重
+            request_text += "以下是RAG参考资料：\n"
+            out = query_engine.query(input_text, top_k=1, use_rerank=False)
+            for item in out:
+                obj = {
+                        'text': item.get('text', ''),
+                        'file_name': item.get('metadata', {}).get('file_name', 'unknown'),
+                        'page': item.get('metadata', {}).get('page', -1)  # 默认值-1表示缺失
+                    }
+                request_text += json.dumps(obj, ensure_ascii=False) + '\n'
 
-    # ## 这里执行RAG的处理流程
-    # if isRAGEnabled:
-    #     request_text = ''
-    #     out = query_engine.query(input_text, top_k=5, use_rerank=True, rerank_top_k=3)
-    #     for item in out:
-    #         request_text += item['main'] + '\n'
-    #         with open('debug.txt','w',encoding='utf-8') as f:
-    #             print(item['main'],file=f,end='\n====================\n')
+            prompt = "Provide summaries for these images, extracting the core elements that cover the images, and output the summary in English. output in 100 words"
+            summary = bedrock.invoke_model(prompt,images=images)
+            out = query_engine.query(summary,top_k=2,use_rerank=False)
+            for item in out:
+                obj = {
+                        'text': item.get('text', ''),
+                        'file_name': item.get('metadata', {}).get('file_name', 'unknown'),
+                        'page': item.get('metadata', {}).get('page', -1)  # 默认值-1表示缺失
+                    }
+                request_text += json.dumps(obj, ensure_ascii=False) + '\n'
 
-    request_text = input_text
-    dd = manager.get_current_turns()
-    dls = [{'role':item['speaker'],'content':[{'type':'text','text':item['content']}]} for item in dd]
-    response = bedrock.invoke_model(request_text,dialogue_list=dls,images=images)
+        else:
+            request_text += "以下是RAG参考资料：\n"
+            out = query_engine.query(input_text, top_k=10,use_rerank=True,rerank_top_k=3)
+            for item in out:
+                obj = {
+                        'text': item.get('text', ''),
+                        'file_name': item.get('metadata', {}).get('file_name', 'unknown'),
+                        'page': item.get('metadata', {}).get('page', -1)  # 默认值-1表示缺失
+                    }
+                request_text += json.dumps(obj, ensure_ascii=False) + '\n'
+
+        with open('debug.txt','a',encoding='utf-8') as f:
+            print(request,file=f,end='\n====================\n')
+
+    # 这个是记忆部分😂
+    cur_turns = []
+    current_char_id=manager.current_dialogue_id
+    if not data['reference_id']:
+        manager.select_dialogue(data['reference_id']) # 切换到引用的会话状态
+        cur_turns += manager.get_current_turns()
+    manager.select_dialogue(current_char_id) # 切换回来
+    cur_turns += manager.get_current_turns()
+    # 这个即是装载了的全部记忆
+    turns_format = [{'role':item['speaker'],'content':[{'type':'text','text':item['content']}]} for item in cur_turns]
+
+    response = bedrock.invoke_model(request_text,dialogue_list=turns_format,images=images)
     manager.add_turn(speaker='assistant',content=response,images=[])
     return jsonify({'res':response}), 200
 
