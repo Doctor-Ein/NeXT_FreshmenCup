@@ -213,6 +213,37 @@ class DialogueDB:
             for dialogue_id in self.db.data["indexes"]["dialogue_timestamps"]
         ]
 
+    def update_dialogue_title(self, dialogue_id: str, new_title: str) -> bool:
+        """Update the title of a dialogue and maintain all indexes.
+        
+        Args:
+            dialogue_id: The ID of the dialogue to update
+            new_title: The new title to set
+            
+        Returns:
+            bool: True if the update was successful, False if the dialogue wasn't found
+        """
+        # Check if dialogue exists
+        if dialogue_id not in self.data["dialogues"]:
+            return False
+        
+        # Get the old title for index updating
+        old_title = self.data["dialogues"][dialogue_id]["title"]
+        
+        # Update the dialogue record
+        self.data["dialogues"][dialogue_id]["title"] = new_title
+        self.data["dialogues"][dialogue_id]["updated_at"] = datetime.datetime.now().isoformat()
+        
+        # Update the title index if needed
+        if old_title in self.data["indexes"]["dialogue_titles"]:
+            self.data["indexes"]["dialogue_titles"].pop(old_title)
+        
+        if new_title:  # Only index non-empty titles
+            self.data["indexes"]["dialogue_titles"][new_title] = dialogue_id
+        
+        self._save_db()
+        return True
+
 class DialogueSession:
     def __init__(self, db: DialogueDB, dialogue_id: str = None):
         self.db = db
@@ -245,6 +276,7 @@ class DialogueSession:
         if not self.current_dialogue:
             raise ValueError("没有选中任何对话")
         return self.db.add_turn(self.current_dialogue, speaker, content, images or [])
+
 
 
 class DialogueManager:
@@ -308,3 +340,6 @@ class DialogueManager:
         if self.current_dialogue_id:
             self.db.delete_dialogue(self.current_dialogue_id)
             self.current_dialogue_id = None
+
+    def update_title(self, dialogue_id,new_title):
+        self.db.update_dialogue_title(dialogue_id, new_title)

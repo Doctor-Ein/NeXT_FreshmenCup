@@ -37,5 +37,6 @@ config = {
         'LanguageCode': voiceLanguageList[voiceIndex],
         'VoiceId':voiceNameList[voiceIndex],
         'OutputFormat': 'pcm',
+        'OutputLanguage':voicePromptList[voiceIndex],
     }
 }

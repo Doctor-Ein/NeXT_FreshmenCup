@@ -4,7 +4,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:8080"])  # 明确指定允许的来源
 
-from dialogue_database import DialogueManager
+from tools.dialogue_database import DialogueManager
 
 manager = DialogueManager('./test_db.json')
 
@@ -54,6 +54,17 @@ def model_schema_settings():
         return jsonify({"message": "配置更新成功"}), 200
     except Exception as e:
         return jsonify({'error': f'配置更新失败: {str(e)}'}), 500
+
+@app.route('/api/update_title',methods=['POST'])
+def update_title():
+    data = request.get_json()
+    invoke_text = "为下面的对话总结摘要一个标题，字数限制10个汉字以内：\n" + str([{'speaker':item['speaker'],'content':item['content']} for item in data['content']])
+    temp=config['bedrock']['api_request']['body']['max_tokens']
+    config['bedrock']['api_request']['body']['max_tokens']=32 # 临时改成极小的最长输出
+    ret = bedrock.invoke_model(invoke_text)
+    manager.update_title(data['id'], ret)
+    config['bedrock']['api_request']['body']['max_tokens']=temp
+    return jsonify({'status':'success'}),200
 
 from AWS_Service.Polly import Reader
 reader: Reader
@@ -140,7 +151,7 @@ def rag_toggle():
     return jsonify({'status': 'success'}), 200
 
 from AWS_Service.BedrockWrapper import BedrockWrapper 
-from AWS_Service.image_zip import compress_base64_image
+from tools.image_zip import compress_base64_image
 bedrock = BedrockWrapper()
 
 @app.route('/api/submit', methods=['POST'])

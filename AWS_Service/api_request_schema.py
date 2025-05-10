@@ -49,7 +49,7 @@ api_request_list = {
         "contentType": "application/json",
         "accept": "*/*",
         "body": {
-            "system":"回答均输出markdown格式的文本。对于数学公式，行内使用$...$；独立公式使用$$...$$，并且在其前需要主动换行",
+            "system":"",
             "messages": "",
             "max_tokens": 1024,
             "temperature": 0.5,
