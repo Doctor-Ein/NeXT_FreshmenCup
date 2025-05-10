@@ -141,7 +141,7 @@ def toggle_transcribe():
         return jsonify({'text': text}), 200
 
 isRAGEnabled = False # aaa随手弄的全局变量哭了
-from RAG_Package.QueryEngine import query_engine
+# from RAG_Package.QueryEngine import query_engine
 
 @app.route('/api/rag_toggle', methods=['POST','OPTIONS'])
 def rag_toggle():
@@ -153,7 +153,7 @@ def rag_toggle():
     isRAGEnabled = data['rag_enabled']
     return jsonify({'status': 'success'}), 200
 
-from AWS_Service.BedrockWrapper import BedrockWrapper 
+from AWS_Service.BedrockWrapper import BedrockWrapper
 from tools.image_zip import compress_base64_image
 bedrock = BedrockWrapper()
 
