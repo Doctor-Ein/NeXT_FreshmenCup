@@ -1,5 +1,7 @@
+import amazon_transcribe.exceptions
 from flask import Flask, request, jsonify, abort
 from flask_cors import CORS
+
 
 app = Flask(__name__)
 CORS(app, origins=["http://localhost:8080"])  # 明确指定允许的来源
@@ -88,6 +90,7 @@ import queue
 import asyncio  # 新增导入
 from AWS_Service.Transcribe import TranscribeService
 from AWS_Service.config import config
+import amazon_transcribe
 
 # 1.1 指令队列与结果存储
 command_queue = queue.Queue()
@@ -99,26 +102,34 @@ def transcribe_worker_wrapper():
     asyncio.set_event_loop(loop)
     loop.run_until_complete(transcribe_worker())
 
+transcribe_success_flag=True
+
 async def transcribe_worker():
     svc = None  # 每次会话独立实例
+    global transcribe_success_flag
+    transcribe_success_flag=True
     while True:
-        cmd = command_queue.get()
-        if cmd == 'start':
-            # 终止之前的服务（如果有）
-            if svc is not None:
-                await svc.stop_transcription()
-            svc = TranscribeService(region=config['region'], language_code='zh-CN')
-            await svc.start_transcription()
-        elif cmd == 'stop':
-            if svc is not None:
-                text = await svc.stop_transcription()
-                result_queue.put(text)
-                svc = None  # 清理实例
-        elif cmd == 'exit':
-            if svc is not None:
-                await svc.stop_transcription()
-            break
-        command_queue.task_done()
+        try:
+            cmd = command_queue.get()
+            if cmd == 'start':
+                if svc is not None: # 终止之前的服务（如果有）
+                    await svc.stop_transcription()
+                svc = TranscribeService(region=config['region'], language_code='zh-CN')
+                await svc.start_transcription()
+            elif cmd == 'stop':
+                if svc is not None:
+                    text = await svc.stop_transcription()
+                    result_queue.put(text)
+                    svc = None  # 清理实例
+            elif cmd == 'exit':
+                if svc is not None:
+                    await svc.stop_transcription()
+                break
+            command_queue.task_done()
+        except amazon_transcribe.exceptions.BadRequestException as e:
+            print("Error:",e.args)
+            transcribe_success_flag=False
+            return
 
 # 1.3 启动后台线程（使用包装函数）
 worker_thread = threading.Thread(target=transcribe_worker_wrapper, daemon=True)
@@ -136,8 +147,10 @@ def toggle_transcribe():
         try:
             # 添加超时避免永久阻塞
             text = result_queue.get(timeout=30)
-        except queue.Empty:
+        except queue.Empty :
             return jsonify({'error': 'Timeout waiting for transcription'}), 504
+        if not transcribe_success_flag:
+            return jsonify({'error': 'Your request timed out because no new audio was received for 15 seconds.'}), 504
         return jsonify({'text': text}), 200
 
 isRAGEnabled = False # aaa随手弄的全局变量哭了
