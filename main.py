@@ -8,7 +8,7 @@ CORS(app, origins=["http://localhost:8080"])  # 明确指定允许的来源
 
 from tools.dialogue_database import DialogueManager
 
-manager = DialogueManager('./test_db.json')
+manager = DialogueManager('./tools/test_db.json')
 
 # 1. 创建新对话
 @app.route('/api/create_dialogue', methods=['POST'])
