@@ -183,7 +183,6 @@ import json
 @app.route('/api/submit', methods=['POST'])
 def handleSubmit():
     data = request.get_json()
-    manager.add_turn(speaker='user',content=data['text'], images=data['images']) # 这里有个概念命名未对齐的问题🤔content在数据库中仅为text的含义
 
     ## 这里执行图像的预处理，有些图像需要压缩
     images = [compress_base64_image(item['data'],item['media_type']) for item in data['images']]
@@ -191,9 +190,9 @@ def handleSubmit():
         images = []
 
     input_text = data['text']
-    request_text = 'RAG模式：\n' + input_text + '\n'
     ## 这里执行RAG的处理流程
     if isRAGEnabled:
+        request_text = 'RAG模式：\n' + input_text + '\n'
         if images: # 如果有图片则降低一点文本ref的权重
             request_text += "以下是RAG参考资料：\n"
             out = query_engine.query(input_text, top_k=1, use_rerank=False)
@@ -229,11 +228,13 @@ def handleSubmit():
 
         with open('./debug.txt','a',encoding='utf-8') as f:
             print(request_text,file=f,end='\n====================\n')
+    else:
+        request_text = input_text + '\n'
 
     # 这个是记忆部分😂
     cur_turns = []
     current_char_id=manager.current_dialogue_id
-    if not data['reference_id']:
+    if data['reference_id']:
         manager.select_dialogue(data['reference_id']) # 切换到引用的会话状态
         cur_turns += manager.get_current_turns()
     manager.select_dialogue(current_char_id) # 切换回来
@@ -242,8 +243,9 @@ def handleSubmit():
     turns_format = [{'role':item['speaker'],'content':[{'type':'text','text':item['content']}]} for item in cur_turns]
 
     response = bedrock.invoke_model(request_text,dialogue_list=turns_format,images=images)
+    manager.add_turn(speaker='user',content=data['text'], images=data['images']) # 这里有个概念命名未对齐的问题🤔content在数据库中仅为text的含义
     manager.add_turn(speaker='assistant',content=response,images=[])
-    return jsonify({'res':response}), 200
+    return jsonify({'query':request_text, 'res':response,'memory':turns_format}), 200
 
 if __name__ == '__main__':
     app.run(debug=True)
