@@ -1,10 +1,18 @@
 import amazon_transcribe.exceptions
-from flask import Flask, request, jsonify, abort
+from flask import Flask, request, jsonify, abort, send_from_directory
 from flask_cors import CORS
 
 
-app = Flask(__name__)
-CORS(app, origins=["http://localhost:8080"])  # 明确指定允许的来源
+app = Flask(__name__, static_folder='static')
+CORS(app)  # 明确指定允许的来源
+
+@app.route('/')
+def index():
+    return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/<path:path>')
+def static_proxy(path):
+    return send_from_directory(app.static_folder, path)
 
 from tools.dialogue_database import DialogueManager
 

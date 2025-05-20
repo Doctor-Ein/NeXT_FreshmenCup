@@ -3,4 +3,4 @@ __pycache__/
 local_models/
 Data/
 JsonDataBase/
-Demo/
+static/
