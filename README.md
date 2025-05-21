@@ -58,6 +58,8 @@ Now we are introducing the most wonderful products of our team.
 ## 🧩 技术细节
 
 ### 🎨 虚拟形象模块
+ 进行了一些live2D模型的渲染调试（以及做出了可以实现粗略的口型拟合的版本hh），感谢xlx把它成功地嵌入到了网页中！
+ 
 ### 💻 前端页面设计
  啊这部分其实真的就是Chatgpt的巨大功劳啊，我怎么可能用这么快的时间学会HTML和CSS呢...........但还是搞了好多奇奇怪怪的资料大概就是扩展一下视野了耶。最重要的就是注意页面的美观，这里要感谢xlx的一次次指导，一些边框最好设计成圆角，这样会好看一点，长宽比例需要不断地调整来达到最完美的效果，其实真的没什么，和后端大佬比起来前端不值一提啦。
 
@@ -82,6 +84,11 @@ Now we are introducing the most wonderful products of our team.
 4. 喜欢stardust：强大，能给队友提供强大的增益buff，提升debug能力hh
 ---
 
+1. 感谢xlx: 最伟大的leader！承担了大部分的工作与极大的压力！各方面的强大无需多言
+2. 感谢stardust: 大佬！代码能力好强！感觉和这样水平的人在同一个专业完全是蹭到了好吧()
+3. 感谢meteor: 谁不想要这样一个情绪价值拉满并给予团队各方面支持的队友呢！
+4. 感谢bleem: 在整个参赛过程中学习到了这么多知识脑子还没有炸掉，这很好了！
+
 
 ## 🚀 **加入我们**
 📢 **关注最新动态，欢迎支持！**
@@ -90,5 +97,5 @@ Now we are introducing the most wonderful products of our team.
 感谢以下个人和团队对项目的贡献：
 - [Meteor728](https://github.com/Meteor728)：感谢你为项目开发了*Multilingual*以及RAEDME的编写，代码很棒，文档也超用心，还有认真地管理了比赛的事项以及火锅非常好吃和开心😋~（这里夸夸是我写的😃 Orz
 - [StarDust](https://github.com/Rewind2Nowhere)：感谢你为项目开发*MultiModal*，并且在项目部分思路构建和Debug方面做出了卓越贡献（不是指1.5h修复4行代码🤣 Orz
-- [bleem](https://github.com/bleem？)：感谢你为项目进行了全面的测试，为每个模块调整适配有效的提示词，确保了项目的稳定性！伟大的提示词工程师！所有思想和努力都看到啦☺️，Orz
+- [bleem](https://github.com/Jocelyn10909)：感谢你为项目进行了全面的测试，为每个模块调整适配有效的提示词，确保了项目的稳定性！伟大的提示词工程师！所有思想和努力都看到啦☺️，Orz
 - [Doctor-Ein](https://github.com/Doctor-Ein)：感谢自己没有哭哦~（来自队友的碎碎念：其实xlx commit了整个项目超过60%的代码，完成了从Milvus数据库构建到异步执行处理再到项目重构的大量工作，做出了巨大的贡献、巨大的牺牲和巨大的carry）
