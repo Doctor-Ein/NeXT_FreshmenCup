@@ -18,7 +18,7 @@ Now we are introducing the most wonderful products of our team.
 
 #### 配置网页静态资源
 - 下载打包好的静态资源[夸克网盘](https://pan.quark.cn/s/0d62ca90c778)，然后将整个文件夹放在程序主目录下。
-- 启动`python main.py`，打开终端中提示的链接（一般为[](http://127.0.0.1:5000)即可访问独属于个人的NeXT-Web！
+- 启动`python main.py`，打开终端中提示的链接（一般为(http://127.0.0.1:5000)即可访问独属于个人的NeXT-Web！
 
 #### 指定个人数据库
 - 创建新的数据库只需新建一个空的json文件即可
